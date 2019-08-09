@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -23,8 +22,7 @@ from netlib import *
 from testlib import *
 
 
-@skipImage("No network checkpoint support", "continuous-atomic",
-           "fedora-atomic", "rhel-atomic", "ubuntu-1804", "ubuntu-stable")
+@skipImage("No network checkpoint support", "fedora-atomic", "ubuntu-1804", "ubuntu-stable")
 class TestNetworking(NetworkCase):
 
     def testCheckpoint(self):
@@ -45,8 +43,10 @@ class TestNetworking(NetworkCase):
         b.wait_visible("#network-interface")
 
         # Disconnect
-        b.click(".panel-heading:contains('%s') .btn:contains('Off')" % iface)
-        b.wait_visible("#confirm-breaking-change-popup")
+        self.wait_onoff(".panel-heading:contains('%s')" % iface, True)
+        self.toggle_onoff(".panel-heading:contains('%s')" % iface)
+
+        # Wait for dialog to appear and dismiss it
         b.click("#confirm-breaking-change-popup button:contains('Keep connection')")
 
         if m.image not in ["debian-testing", "debian-stable", "ubuntu-1804", "ubuntu-stable"]:
@@ -58,7 +58,6 @@ class TestNetworking(NetworkCase):
             b.set_val('#network-ip-settings-dialog input[placeholder="Address"]', "1.2.3.4")
             b.set_val('#network-ip-settings-dialog input[placeholder*="Netmask"]', "24")
             b.click("#network-ip-settings-dialog button:contains('Apply')")
-            b.wait_visible("#confirm-breaking-change-popup")
             b.click("#confirm-breaking-change-popup button:contains('Keep connection')")
 
     @skipImage("Main interface settings are read-only", "debian-stable",
@@ -122,9 +121,9 @@ class TestNetworking(NetworkCase):
         self.slow_down_dhclient(dhcp_delay)
 
         # Disconnect and trigger a slow rollback
-        b.click(".panel-heading:contains('%s') .btn:contains('Off')" % iface)
+        self.wait_onoff(".panel-heading:contains('%s')" % iface, True)
+        self.toggle_onoff(".panel-heading:contains('%s')" % iface)
         with b.wait_timeout(120):
-            b.wait_visible("#confirm-breaking-change-popup")
             b.click("#confirm-breaking-change-popup button:contains('Keep connection')")
 
 if __name__ == '__main__':

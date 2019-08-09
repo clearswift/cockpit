@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,11 +21,13 @@ import parent
 from netlib import *
 from testlib import *
 
+from machine_core.constants import TEST_OS_DEFAULT
+
 
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": {"address": "10.111.113.1/20"},
-        "machine2": {"image": "fedora-29", "address": "10.111.113.2/20", "dhcp": True}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True}
     }
 
     def testBond(self):
@@ -58,18 +59,22 @@ class TestNetworking(NetworkCase):
         b.click("#networking-interfaces tr[data-interface='tbond'] td:first-child")
         b.wait_visible("#network-interface")
         b.wait_present("#network-interface-slaves tr[data-interface='%s']" % iface1)
-        b.wait_present("#network-interface-slaves tr[data-interface='%s'] .btn.active:contains('On')" % iface1)
+        self.wait_onoff("#network-interface-slaves tr[data-interface='%s']" % iface1, True)
         b.wait_present("#network-interface-slaves tr[data-interface='%s']" % iface2)
-        b.wait_present("#network-interface-slaves tr[data-interface='%s'] .btn.active:contains('On')" % iface2)
+        self.wait_onoff("#network-interface-slaves tr[data-interface='%s']" % iface2, True)
 
         # Deactivate the bond and make sure it is still there after a
         # reload.
         b.wait_text_not("#network-interface-mac", "")
-        b.wait_present(".panel-heading:contains('tbond') .btn.active:contains('On')")
-        b.click(".panel-heading:contains('tbond') .btn:contains('Off')")
+        self.wait_onoff(".panel-heading:contains('tbond')", True)
+        self.toggle_onoff(".panel-heading:contains('tbond')")
         b.wait_in_text("tr:contains('Status')", "Inactive")
-        self.assertNotIn("disabled",
-                         b.attr(".panel-heading:contains('tbond') .btn:contains('On')", "class"))
+        # changed in PR #11769
+        if m.image in ["rhel-8-0-distropkg"]:
+            self.assertNotIn("disabled",
+                             b.attr(".panel-heading:contains('tbond') .btn:contains('On')", "class"))
+        else:
+            b.wait_not_present(".panel-heading:contains('tbond') .onoff-ct input:disabled")
 
         b.reload()
         b.enter_page("/network")
@@ -82,6 +87,12 @@ class TestNetworking(NetworkCase):
         b.click("#network-interface button:contains('Delete')")
         b.wait_visible("#networking")
         b.wait_not_present("#networking-interfaces tr[data-interface='tbond']")
+
+        # Check that the former members are displayed and both On
+        # Fixed in PR #12400
+        if m.image not in ["rhel-8-0-distropkg"]:
+            self.wait_for_iface(iface1)
+            self.wait_for_iface(iface2)
 
         # Due to above reload
         self.allow_journal_messages(".*Connection reset by peer.*",
@@ -146,8 +157,7 @@ class TestNetworking(NetworkCase):
         # Rename while it is active
 
         b.click("#networking-interfaces tr[data-interface='tbond'] td:first-child")
-        b.wait_visible("#network-interface")
-        b.click("#network-interface .panel-heading .btn:contains('On')")
+        self.wait_onoff("#network-interface .panel-heading", True)
         b.wait_in_text("tr:contains('Status')", "Configuring")
 
         b.click("tr:contains('Bond') a")

@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 # This file is part of Cockpit.
 #
@@ -223,7 +222,7 @@ def finish(publishing, ret, name, context, issue):
         requests = [ {
             "method": "POST",
             "resource": api.qualify("issues/{0}".format(number)),
-            "data": { "title": issue["title"], "body": body }
+            "data": { "title": "{0}".format(issue["title"]), "body": body }
         } ]
 
         # Close the issue if it's not a pull request, successful, and all tasks done
@@ -455,9 +454,15 @@ def pull(branch, body=None, issue=None, base="master", labels=['bot'], run_tests
         (user, branch) = branch.split(":")
         push_branch(user, branch, True)
 
-        # If we don't want to run tests automatically, drop [no-test] from title after force push
-        if not run_tests:
-            pull = api.post("pulls/" + str(pull["number"]), {"title": kwargs["title"]}, accept=[ 422 ])
+        # Make sure we return the updated pull data
+        for retry in range(20):
+            new_data = api.get("pulls/{}".format(pull["number"]))
+            if pull["head"]["sha"] != new_data["head"]["sha"]:
+                pull = new_data
+                break
+            time.sleep(6)
+        else:
+            raise RuntimeError("Failed to retrieve updated pull data after force pushing")
 
     return pull
 
@@ -471,7 +476,7 @@ def label(issue, labels=['bot']):
 def labels_of_pull(pull):
     if "labels" not in pull:
         pull["labels"] = api.get("issues/{0}/labels".format(pull["number"]))
-    return map(lambda label: label["name"], pull["labels"])
+    return list(map(lambda label: label["name"], pull["labels"]))
 
 def comment(issue, comment):
     try:

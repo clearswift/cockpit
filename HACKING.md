@@ -14,11 +14,17 @@ Cockpit uses Node.js during development. Node.js is not used at runtime.
 To make changes on Cockpit you'll want to install Node.js, NPM and
 various development dependencies like Webpack.
 
-On Debian or Ubuntu:
+On Debian and Ubuntu, the available versions of nodejs and npm are old
+and/or incompatible with each other.  You should not try to use them to
+build cockpit.  You can use the helpful "n" utility to get a more
+reasonable environment to work with.
 
     $ sudo apt-get install nodejs npm
+    $ sudo npm install -g n
+    $ sudo apt-get remove nodejs npm
+    $ sudo n lts
 
-On Fedora:
+On Fedora, the distribution verisons are sufficient:
 
     $ sudo dnf install nodejs npm
 
@@ -45,14 +51,14 @@ The following should work in a fresh Git clone:
       sudo dnf builddep --spec $TEMPFILE && \
       rm $TEMPFILE
 
-In addition, for testing, the following dependencies are required:
+For running integration tests, the following dependencies are required:
 
-    $ sudo dnf install curl expect \
-        libvirt libvirt-client libvirt-daemon libvirt-python \
-        python python-libguestfs python-lxml libguestfs-xfs \
-        python3 libvirt-python3 \
-        libguestfs-tools qemu qemu-kvm rpm-build rsync xz \
-        chromium-headless
+    $ sudo dnf install curl expect xz rpm-build chromium-headless \
+        libvirt-daemon-kvm libvirt-client python3-libvirt
+
+Creating VM images locally (not necessary for running tests) needs the following:
+
+    $ sudo dnf install virt-install libguestfs-tools-c
 
 ## Building
 
@@ -130,10 +136,10 @@ Violations of some rules can be fixed automatically by:
 
 Rules configuration can be found in the `.eslintrc.json` file.
 
-## Working on your local machine
+## Working on your local machine: Cockpit's session pages
 
 It's easy to set up your local Linux machine for rapid development of Cockpit's
-JavaScript code. First install Cockpit on your local machine as described in:
+JavaScript code (in pkg/). First install Cockpit on your local machine as described in:
 
 https://cockpit-project.org/running.html
 
@@ -158,6 +164,25 @@ To make Cockpit again use the installed code, rather than that from your
 git checkout directory, run the following, and log into Cockpit again:
 
     $ rm ~/.local/share/cockpit
+
+## Working on your local machine: Web server resources
+
+To test changes to the login page or any other resources, you can bind-mount
+the build tree's `dist/static/` directory over the  system one:
+
+    $ sudo mount -o bind dist/static/ /usr/share/cockpit/static/
+
+Likewise, to test changes to the branding, use
+
+    $ sudo mount -o bind src/branding/ /usr/share/cockpit/branding/
+
+After that, run `systemctl stop cockpit.service` to ensure that the web server
+restarts on the next browser request.
+
+To make Cockpit again use the system-installed code, simply umount these again:
+
+   $ sudo umount /usr/share/cockpit/static/ /usr/share/cockpit/branding/
+   $ systemctl stop cockpit.service
 
 ## Working on Cockpit using Vagrant
 
@@ -308,7 +333,7 @@ image. This image cannot be freely distributed for licensing reasons.
 Make sure you have the ```virt-viewer``` package installed on your Linux
 machine. And then run the following from the Cockpit checkout directory:
 
-    $ test/vm-run --network windows-10
+    $ bots/vm-run --network windows-10
 
 If the image is not yet downloaded, it'll take a while to download and
 you'll see progress on the command line. A screen will pop up and

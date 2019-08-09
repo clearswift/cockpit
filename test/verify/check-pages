@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -61,7 +60,7 @@ OnCalendar=daily
 
         # On Atomic no locales other than en_US are supported on the host itself
         # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1186757
-        elif m.image in ["continuous-atomic", "fedora-atomic", "rhel-atomic"]:
+        elif m.image in ["fedora-atomic"]:
             self.allow_journal_messages("invalid or unusable locale: de_DE.UTF-8")
 
         # login so that we have a cookie.
@@ -71,11 +70,18 @@ OnCalendar=daily
         b.enter_page("/system/services")
         b.reload()
         b.enter_page("/system/services")
-        b.wait_text("#service-unit .panel-heading", "Test Service")
+        if m.image in ["rhel-8-0-distropkg"]: # Changed in #12265
+            b.wait_text("#service-unit .panel-heading", "Test Service")
+        else:
+            b.wait_text(".service-name", "Test Service")
+
 
         m.restart_cockpit()
         b.relogin("/system/services")
-        b.wait_text("#service-unit .panel-heading", "Test Service")
+        if m.image in ["rhel-8-0-distropkg"]: # Changed in #12265
+            b.wait_text("#service-unit .panel-heading", "Test Service")
+        else:
+            b.wait_text(".service-name", "Test Service")
 
         # check that navigating away and back preserves place
         b.switch_to_top()
@@ -85,10 +91,11 @@ OnCalendar=daily
         b.switch_to_top()
         b.click("a[href='/system/services']")
         b.enter_page("/system/services")
-        b.wait_present("#service-unit .panel-heading")
-        b.wait_visible("#service-unit")
         b.wait_present("ol.breadcrumb")
-        b.wait_text("#service-unit .panel-heading", "Test Service")
+        if m.image in ["rhel-8-0-distropkg"]: # Changed in #12265
+            b.wait_text("#service-unit .panel-heading", "Test Service")
+        else:
+            b.wait_text(".service-name", "Test Service")
         b.switch_to_top()
         b.wait_js_cond('window.location.pathname === "/system/services"')
         b.wait_js_cond('window.location.hash === "#/test.service"')
@@ -98,11 +105,12 @@ OnCalendar=daily
         b.switch_to_top()
         b.click("a[href='/system/services']")
         b.enter_page("/system/services")
-        if m.image in ["rhel-7-6-distropkg", "rhel-8-0-distropkg"]:
+        if m.image in ["rhel-8-0-distropkg"]:
             b.wait_present("#services-list-enabled")
+            b.wait_not_visible("#service-unit")
         else:
             b.wait_present("#services-list")
-        b.wait_not_visible("#service-unit")
+            b.wait_not_visible("#service-details")
         b.switch_to_top()
         b.wait_js_cond('window.location.pathname === "/system/services"')
         b.wait_js_cond('window.location.hash === ""')
@@ -118,13 +126,13 @@ OnCalendar=daily
 
         # This should be visible now
         b.switch_to_frame("cockpit1:localhost/playground/test")
-        b.wait_text("#hidden", "visible")
+        b.wait_visible("#hidden")
 
         # This should now say invisible
         b.switch_to_top()
         b.go("/@localhost/system/services")
         b.switch_to_frame("cockpit1:localhost/playground/test")
-        b.wait_text("#hidden", "hidden")
+        b.wait_not_visible("#hidden")
 
         b.switch_to_top()
 
@@ -156,10 +164,10 @@ OnCalendar=daily
         # Systemd timer localization
         b.go("/system/services")
         b.enter_page("/system/services")
-        if m.image in ["rhel-7-6-distropkg", "rhel-8-0-distropkg"]:
+        if m.image in ["rhel-8-0-distropkg"]:
             b.click('#services-filter button[data-pattern=\'\\\.timer\$\']')
         else:
-            b.click('#services-filter li[data-pattern=\'\\\.timer\$\']')
+            b.click('#services-filter li:nth-child(4) a')
         # HACK: the timers' next run/last trigger (col 3/4) don't always get filled (issue #9439)
         # b.wait_in_text("tr[data-goto-unit='test\.timer'] td:nth-child(3)", "morgen um")
 
@@ -206,11 +214,6 @@ OnCalendar=daily
         self.assertEqual(b.text("#ngettext-context-disks-1"), u"$0 Datenträger fehlt")
         self.assertEqual(b.text("#ngettext-context-disks-2"), u"$0 Datenträger fehlen")
 
-        # Angular
-        self.assertEqual(b.text("#angular-translate"), "Bereit")
-        self.assertEqual(b.text("#angular-context"), "Bereiten")
-        self.assertEqual(b.text("#angular-interpolate"), u"'Marmalade' löschen!!!")
-
         # Log out and check that login page is translated now
         b.logout()
         b.wait_visible('#password-group')
@@ -219,7 +222,7 @@ OnCalendar=daily
         # Test all languages
         # Test that pages do not oops and that locale is valid
 
-        if m.image not in ["fedora-29", "fedora-30"]:
+        if m.image not in ["fedora-30"]:
             return
 
         def line_sel(i):
@@ -284,7 +287,7 @@ OnCalendar=daily
 
         # On Atomic no locales other than en_US are supported on the host itself
         # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1186757
-        elif m.image in ['continuous-atomic', 'fedora-atomic', 'rhel-atomic']:
+        elif m.image in ['fedora-atomic']:
             self.allow_journal_messages('invalid or unusable locale: pt_BR.UTF-8')
 
         self.login_and_go('/system')
@@ -308,10 +311,10 @@ OnCalendar=daily
         # Systemd timer localization
         b.go('/system/services')
         b.enter_page('/system/services')
-        if m.image in ["rhel-7-6-distropkg", "rhel-8-0-distropkg"]:
+        if m.image in ["rhel-8-0-distropkg"]:
             b.click('#services-filter button[data-pattern=\'\\\.timer\$\']')
         else:
-            b.click('#services-filter li[data-pattern=\'\\\.timer\$\']')
+            b.click('#services-filter li:nth-child(4) a')
         # HACK: the timers' next run/last trigger (col 3/4) don't always get filled (issue #9439)
         # b.wait_in_text('tr[data-goto-unit=\'test\.timer\'] td:nth-child(3)', 'morgen um')
 
@@ -353,14 +356,8 @@ OnCalendar=daily
         self.assertEqual(b.text('#ngettext-context-disks-1'), u'$0 disco não encontrado')
         self.assertEqual(b.text('#ngettext-context-disks-2'), u'$0 discos não encontrados')
 
-        # Angular
-        self.assertEqual(b.text('#angular-translate'), 'Pronto')
-        self.assertEqual(b.text('#angular-context'), 'Pronto')
-        self.assertEqual(b.text('#angular-interpolate'), 'Deletar \'Marmalade\'')
-
         # Log out and check that login page is translated now
         b.logout()
-        b.wait_visible('#password-group')
         b.wait_text('#password-group > label', 'Senha')
 
     def testFrameReload(self):
@@ -417,7 +414,6 @@ OnCalendar=daily
         # need to wait for the widget's "fast typing" inhibition delay to trigger the completion popup
         time.sleep(1)
         b.key_press([" ", "\b"])
-        b.wait_visible(".file-autocomplete-ct .dropdown-menu")
         b.wait_text(".file-autocomplete-ct .dropdown-menu a[data-type='file']", "file1.txt")
         b.wait_text(".file-autocomplete-ct .dropdown-menu a[data-type='directory']", "dir1/")
         # no other items; b.text() removes newlines
@@ -430,7 +426,6 @@ OnCalendar=daily
         b.focus(".file-autocomplete-ct input")
         time.sleep(1)
         b.key_press([" ", "\b"])
-        b.wait_visible(".file-autocomplete-ct .dropdown-menu")
         # this should still be unique
         b.wait_text(".file-autocomplete-ct .dropdown-menu a[data-type='file']", "file1.txt")
         # no other items
@@ -447,11 +442,9 @@ OnCalendar=daily
         b.key_press("/")
         time.sleep(1)
         b.key_press(" ")
-        b.wait_visible(".file-autocomplete-ct .dropdown-menu")
         b.wait_text(".file-autocomplete-ct .dropdown-menu", "dir1/file1.txtother")
 
-    @skipImage("No PCP available on Atomic", "fedora-atomic", "rhel-atomic", "continuous-atomic")
-    @skipImage("No PCP available on Debian 9", "debian-stable")
+    @skipImage("No PCP available", "fedora-atomic")
     def testPlots(self):
         b = self.browser
         m = self.machine

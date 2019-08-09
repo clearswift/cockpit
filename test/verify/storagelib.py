@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This file is part of Cockpit.
 #
 # Copyright (C) 2015 Red Hat, Inc.
@@ -142,7 +140,7 @@ class StorageCase(MachineCase):
             row_item = row + " tr.listing-ct-item"
             tab_btn = row + " .listing-ct-head li:nth-child(%d) a" % tab_index
             tab = row + " .listing-ct-body:nth-child(%d)" % (tab_index + 1)
-            cell = tab + " div.ct-form-layout label:contains(%s) + *" % title
+            cell = tab + " div.ct-form label:contains(%s) + *" % title
 
             if not b.is_present(row + ".open"):
                 if not b.is_present(row_item):
@@ -168,7 +166,7 @@ class StorageCase(MachineCase):
 
     def content_tab_info_label(self, row_index, tab_index, title):
         tab = self.content_tab_expand(row_index, tab_index)
-        return tab + " div.ct-form-layout label:contains(%s)" % title
+        return tab + " div.ct-form label:contains(%s)" % title
 
     def content_tab_info_action(self, row_index, tab_index, title, wrapped=False):
         label = self.content_tab_info_label(row_index, tab_index, title)
@@ -348,7 +346,7 @@ class StorageCase(MachineCase):
     #   This is also done by repeatedly opening a dialog until all
     #   needed block devices are listed.
 
-    def dialog_with_retry(self, trigger, values, expect):
+    def dialog_open_with_retry(self, trigger, expect):
         def setup():
             trigger()
             self.dialog_wait_open()
@@ -363,6 +361,19 @@ class StorageCase(MachineCase):
             self.dialog_cancel()
             self.dialog_wait_close()
         self.retry(setup, check, teardown)
+
+    def dialog_apply_with_retry(self):
+        def step():
+            try:
+                self.dialog_apply()
+                self.dialog_wait_close()
+            except Error:
+                return False
+            return True
+        self.browser.wait(step)
+
+    def dialog_with_retry(self, trigger, values, expect):
+        self.dialog_open_with_retry(trigger, expect)
         if values:
             for f in values:
                 self.dialog_set_val(f, values[f])

@@ -30,10 +30,6 @@ createOptions(){
 EOF
 }
 
-if [ -z "$OS" ]; then
-    OS="auto"
-fi
-
 if [ -z "$DISKS" ]; then
     DISKS_PARAM="--disk none"
 else
@@ -50,7 +46,7 @@ fi
 
 if [ "$SOURCE_TYPE" = "pxe" ]; then
     INSTALL_METHOD="--pxe --network $SOURCE"
-elif [ "${SOURCE#/}" != "$SOURCE" ] && [ -f "${SOURCE}" ]; then
+elif ( [ "${SOURCE#/}" != "$SOURCE" ] && [ -f "${SOURCE}" ] ) || ( [ "$SOURCE_TYPE" = "url" ] && [ "${SOURCE%.iso}" != "$SOURCE" ] ); then
     INSTALL_METHOD="--cdrom $SOURCE"
 else
     INSTALL_METHOD="--location $SOURCE"
@@ -73,6 +69,7 @@ virt-install \
     --wait -1 \
     --noautoconsole \
     --noreboot \
+    --check path_in_use=off \
     $DISKS_PARAM \
     $INSTALL_METHOD \
     $GRAPHICS_PARAM
@@ -103,8 +100,8 @@ else
     if vmExists "$VM_NAME"; then
         # undefine if the domain was created but still failed
         virsh -c "$CONNECTION_URI" -q undefine "$VM_NAME" --managed-save
+        virsh -c "$CONNECTION_URI" -q define "$DOMAIN_FILE"
     fi
-    virsh -c "$CONNECTION_URI" -q define "$DOMAIN_FILE"
     rm -f "$DOMAIN_FILE"
-    exit 1
+    exit $EXIT_STATUS
 fi

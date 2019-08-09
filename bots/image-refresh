@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 # This file is part of Cockpit.
 #
@@ -21,84 +20,89 @@
 import os
 import subprocess
 import sys
+import time
 
 import task
 from task import github, REDHAT_STORE
 
 TRIGGERS = {
     "centos-7": [
-        "verify/centos-7"
+        "centos-7@cockpit-project/starter-kit",
     ],
     "continuous-atomic": [
-        "verify/continuous-atomic"
+        "continuous-atomic@cockpit-project/cockpit-ostree",
     ],
     "debian-testing": [
-        "verify/debian-testing"
+        "debian-testing"
     ],
     "debian-stable": [
-        "verify/debian-stable"
+        "debian-stable"
     ],
     "fedora-29": [
-        "verify/fedora-29",
-        "verify/fedora-atomic",
-        "container/kubernetes",
-        "container/bastion",
+        "fedora-atomic",
+        "fedora-29@cockpit-project/cockpit-podman",
     ],
     "fedora-30": [
-        "verify/fedora-30",
-        "selenium/chrome",
-        "selenium/firefox",
-        "selenium/edge",
-        "avocado/fedora",
+        "fedora-30",
+        "fedora-30/selenium-chrome",
+        "fedora-30/selenium-firefox",
+        "fedora-30/selenium-edge",
+        "fedora-30/container-bastion",
+        "fedora-30@cockpit-project/starter-kit",
+        "fedora-30@cockpit-project/cockpit-podman",
+        "fedora-30@weldr/lorax",
+        "fedora-30/live-iso@weldr/lorax",
+        "fedora-30/qcow2@weldr/lorax",
+        "fedora-30/chrome@weldr/cockpit-composer",
+        "fedora-30/firefox@weldr/cockpit-composer",
+        "fedora-30/edge@weldr/cockpit-composer",
     ],
     "fedora-atomic": [
-        "verify/fedora-atomic"
+        "fedora-atomic",
+        "fedora-atomic@cockpit-project/cockpit-ostree",
     ],
     "fedora-testing": [
-        "verify/fedora-testing"
+        "fedora-testing"
     ],
     "fedora-i386": [
-        "verify/fedora-i386"
+        "fedora-i386"
     ],
     "ubuntu-1804": [
-        "verify/ubuntu-1804"
+        "ubuntu-1804"
     ],
     "ubuntu-stable": [
-        "verify/ubuntu-stable"
+        "ubuntu-stable"
     ],
     "openshift": [
-        "container/kubernetes",
-        "verify/fedora-29",
-        "verify/rhel-7-6"
+        # FIXME: need to test a rhel-7.x branch here, once we can
     ],
     "ipa": [
-        "verify/fedora-29",
-        "verify/rhel-7-6",
-        "verify/rhel-7-6-distropkg",
-        "verify/ubuntu-1804",
-        "verify/debian-stable"
+        "fedora-30",
+        "ubuntu-1804",
+        "debian-stable"
     ],
-    "rhel-7-6": [
-        "verify/rhel-7-6",
-        "verify/rhel-7-6-distropkg",
-        "verify/rhel-atomic"  # builds in rhel-7-6
+    "selenium": [
+        "fedora-30/selenium-chrome",
+        "fedora-30/selenium-firefox",
     ],
     "rhel-7-7": [
-        "verify/rhel-7-7",
+        "rhel-7-7/firefox@weldr/cockpit-composer",
     ],
     "rhel-8-0": [
-        "verify/rhel-8-0"
+        "rhel-8-0",
+        "rhel-8-0-distropkg",
     ],
     "rhel-8-1": [
-        "verify/rhel-8-1"
+        "rhel-8-1",
+        "rhel-8-1/chrome@weldr/cockpit-composer",
+        "rhel-8-1@cockpit-project/cockpit-podman",
     ],
     "rhel-atomic": [
-        "verify/rhel-atomic"
+        "rhel-atomic@cockpit-project/cockpit-ostree",
     ]
 }
 
 STORES = {
-    "rhel-7-6": REDHAT_STORE,
     "rhel-7-7": REDHAT_STORE,
     "rhel-8-0": REDHAT_STORE,
     "rhel-8-1": REDHAT_STORE,
@@ -119,7 +123,7 @@ def run(image, verbose=False, **kwargs):
     store = STORES.get(image, None)
 
     # Cleanup any extraneous disk usage elsewhere
-    subprocess.check_call([ os.path.join(BASE, "test", "vm-reset") ])
+    subprocess.check_call([ os.path.join(BOTS, "vm-reset") ])
 
     cmd = [ os.path.join(BOTS, "image-create"), "--verbose", "--upload" ]
     if store:
@@ -136,14 +140,20 @@ def run(image, verbose=False, **kwargs):
         pull = task.pull(branch, run_tests=False, **kwargs)
 
         # Trigger this pull request
-        head = pull["head"]["sha"]
         api = github.GitHub()
+        head = pull["head"]["sha"]
         for trigger in triggers:
             api.post("statuses/{0}".format(head), { "state": "pending", "context": trigger,
                 "description": github.NOT_TESTED_DIRECT })
-        # pre-creating statuses circumvents tests-scan's detection of whether bots/ changed
-        # we want to validate all image refreshes with external projects
-        task.label(pull, ["test-external"])
+
+        # Wait until all of the statuses are present so the no-test label can
+        # safely be removed by the task api
+        for retry in range(20):
+            if all(status in triggers for status in api.statuses(head).keys()):
+                break
+            time.sleep(6)
+        else:
+            raise RuntimeError("Failed to confirm the presence of all triggers")
 
 if __name__ == '__main__':
-    task.main(function=run, title="Refresh image [no-test]")
+    task.main(function=run, title="Refresh image")

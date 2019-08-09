@@ -25,19 +25,26 @@
 G_BEGIN_DECLS
 
 #define COCKPIT_TYPE_WEB_SERVER  (cockpit_web_server_get_type ())
-#define COCKPIT_WEB_SERVER(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), COCKPIT_TYPE_WEB_SERVER, CockpitWebServer))
-#define COCKPIT_IS_WEB_SERVER(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), COCKPIT_TYPE_WEB_SERVER))
-
-typedef struct _CockpitWebServer CockpitWebServer;
+G_DECLARE_FINAL_TYPE(CockpitWebServer, cockpit_web_server, COCKPIT, WEB_SERVER, GObject)
 
 extern guint cockpit_webserver_request_timeout;
 extern gsize cockpit_webserver_request_maximum;
 
-GType              cockpit_web_server_get_type      (void) G_GNUC_CONST;
+typedef enum {
+  COCKPIT_WEB_SERVER_NONE = 0,
+  COCKPIT_WEB_SERVER_FOR_TLS_PROXY = 1 << 0,
+  /* http → https redirection for non-localhost addresses */
+  COCKPIT_WEB_SERVER_REDIRECT_TLS = 1 << 1,
+  /* http → https redirection for reverse proxy setups: Look at Host: header instead of connection IP */
+  COCKPIT_WEB_SERVER_REDIRECT_TLS_PROXY = 1 << 2,
+  COCKPIT_WEB_SERVER_FLAGS_MAX = 1 << 3
+} CockpitWebServerFlags;
+
 
 CockpitWebServer * cockpit_web_server_new           (const gchar *address,
                                                      gint port,
                                                      GTlsCertificate *certificate,
+                                                     CockpitWebServerFlags flags,
                                                      GCancellable *cancellable,
                                                      GError **error);
 
@@ -59,10 +66,7 @@ gboolean           cockpit_web_server_get_socket_activated (CockpitWebServer *se
 
 gint               cockpit_web_server_get_port             (CockpitWebServer *self);
 
-void               cockpit_web_server_set_redirect_tls     (CockpitWebServer *self,
-                                                            gboolean          redirect_tls);
-
-gboolean           cockpit_web_server_get_redirect_tls     (CockpitWebServer *self);
+CockpitWebServerFlags cockpit_web_server_get_flags         (CockpitWebServer *self);
 
 G_END_DECLS
 

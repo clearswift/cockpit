@@ -67,11 +67,13 @@ function bytes_from_nm32(num) {
             bytes[i] = num & 0xFF;
             num = num >>> 8;
         }
-    } else {
+    } else if (byteorder == "le") {
         for (i = 0; i < 4; i++) {
             bytes[i] = num & 0xFF;
             num = num >>> 8;
         }
+    } else {
+        throw new Error("byteorder is unset or has invalid value " + JSON.stringify(byteorder));
     }
     return bytes;
 }
@@ -114,10 +116,12 @@ export function ip4_from_text(text, empty_is_zero) {
         for (i = 0; i < 4; i++) {
             shift(bytes[i]);
         }
-    } else {
+    } else if (byteorder == "le") {
         for (i = 3; i >= 0; i--) {
             shift(bytes[i]);
         }
+    } else {
+        throw new Error("byteorder is unset or has invalid value " + JSON.stringify(byteorder));
     }
 
     return num;
@@ -211,4 +215,48 @@ export function ip6_from_text(text, empty_is_zero) {
         invalid();
 
     return cockpit.base64_encode(bytes);
+}
+
+export function list_interfaces() {
+    let client = cockpit.dbus("org.freedesktop.NetworkManager");
+    return client.call('/org/freedesktop/NetworkManager',
+                       'org.freedesktop.NetworkManager',
+                       'GetAllDevices', [])
+            .then(reply => {
+                // We can't use Promise.all() here until cockpit is able to dispatch es2015 promises
+                // https://github.com/cockpit-project/cockpit/issues/10956
+                // eslint-disable-next-line cockpit/no-cockpit-all
+                let promises = cockpit.all(reply[0].map(device => {
+                    // We can't use Promise.all() here until cockpit is able to dispatch es2015 promises
+                    // https://github.com/cockpit-project/cockpit/issues/10956
+                    // eslint-disable-next-line cockpit/no-cockpit-all
+                    let devicePromises = cockpit.all([
+                        client.call(device,
+                                    'org.freedesktop.DBus.Properties',
+                                    'Get', ['org.freedesktop.NetworkManager.Device', 'Interface'])
+                                .then(reply => reply[0]),
+                        client.call(device,
+                                    'org.freedesktop.DBus.Properties',
+                                    'Get', ['org.freedesktop.NetworkManager.Device', 'Capabilities'])
+                                .then(reply => reply[0])
+                    ]);
+                    return devicePromises.then(function (device) {
+                        if (Array.isArray(device) && device.length === 0)
+                            return [];
+                        return Array.prototype.slice.call(arguments);
+                    });
+                }));
+                return promises.then(function (devices) {
+                    if (Array.isArray(devices) && devices.length === 0)
+                        return [];
+                    return Array.prototype.slice.call(arguments);
+                });
+            })
+            .then(interfaces => {
+                client.close();
+                return Promise.resolve(interfaces.map(i => {
+                    return { device: i[0].v, capabilities: i[1].v };
+                }));
+            })
+            .catch(error => console.warn(error));
 }

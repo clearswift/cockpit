@@ -60,9 +60,6 @@ const gchar *cockpit_ws_ssh_program =
 /* Timeout of authenticated session when no connections */
 guint cockpit_ws_service_idle = 15;
 
-/* Timeout of everything when noone is connected */
-guint cockpit_ws_process_idle = 90;
-
 /* The amount of time a spawned process has to complete authentication */
 guint cockpit_ws_auth_process_timeout = 30;
 guint cockpit_ws_auth_response_timeout = 60;
@@ -76,6 +73,29 @@ static guint sig__idling = 0;
 
 /* Tristate tracking whether gssapi works properly */
 static gint gssapi_available = -1;
+
+static guint
+get_process_idle (void)
+{
+  static guint seconds = 0;
+  if (seconds == 0) /* lazy initialization */
+    {
+      const char *val = g_getenv ("COCKPIT_WS_PROCESS_IDLE");
+
+      seconds = 90; /* default value */
+      if (val)
+        {
+          char *endptr;
+          gint64 x = g_ascii_strtoll (val, &endptr, 10);
+          if (*endptr == '\0' && x > 0 && x <= G_MAXUINT)
+            seconds = (guint) x;
+          else
+            g_warning ("Invalid value for COCKPIT_WS_PROCESS_IDLE, ignoring: %s", val);
+        }
+    }
+
+  return seconds;
+}
 
 G_DEFINE_TYPE (CockpitAuth, cockpit_auth, G_TYPE_OBJECT)
 
@@ -279,7 +299,7 @@ cockpit_auth_init (CockpitAuth *self)
   self->conversations = g_hash_table_new_full (g_str_hash, g_str_equal,
                                                NULL, cockpit_session_unref);
 
-  self->timeout_tag = g_timeout_add_seconds (cockpit_ws_process_idle,
+  self->timeout_tag = g_timeout_add_seconds (get_process_idle (),
                                              on_process_timeout, self);
 
   self->startups = 0;
@@ -423,8 +443,8 @@ timeout_option (const gchar *name,
                 const gchar *type,
                 guint default_value)
 {
-  return cockpit_conf_guint (type, name, default_value,
-                             MAX_AUTH_TIMEOUT, MIN_AUTH_TIMEOUT);
+  return cockpit_conf_uint (type, name, default_value,
+                            MAX_AUTH_TIMEOUT, MIN_AUTH_TIMEOUT);
 }
 
 static const gchar *
@@ -984,7 +1004,7 @@ on_web_service_idling (CockpitWebService *service,
   if (session->auth->timeout_tag)
     g_source_remove (session->auth->timeout_tag);
 
-  session->auth->timeout_tag = g_timeout_add_seconds (cockpit_ws_process_idle,
+  session->auth->timeout_tag = g_timeout_add_seconds (get_process_idle (),
                                                       on_process_timeout, session->auth);
 }
 
@@ -1092,6 +1112,12 @@ cockpit_session_launch (CockpitAuth *self,
     {
       env = g_environ_setenv (env, "COCKPIT_REMOTE_PEER",
                               cockpit_creds_get_rhost (creds),
+                              TRUE);
+    }
+  if (g_strcmp0 (g_hash_table_lookup (headers, "X-SSH-Connect-Unknown-Hosts"), "yes") == 0)
+    {
+      env = g_environ_setenv (env, "COCKPIT_SSH_CONNECT_TO_UNKNOWN_HOSTS",
+                              "1",
                               TRUE);
     }
 
@@ -1524,7 +1550,10 @@ cockpit_auth_login_finish (CockpitAuth *self,
 
       if (headers)
         {
-          force_secure = connection ? !G_IS_SOCKET_CONNECTION (connection) : TRUE;
+          if (self->flags & COCKPIT_AUTH_FOR_TLS_PROXY)
+            force_secure = TRUE;
+          else
+            force_secure = connection ? !G_IS_SOCKET_CONNECTION (connection) : TRUE;
           cookie_name = application_cookie_name (cockpit_creds_get_application (creds));
           cookie_b64 = g_base64_encode ((guint8 *)session->cookie, strlen (session->cookie));
           header = g_strdup_printf ("%s=%s; Path=/; %s HttpOnly",
@@ -1557,12 +1586,14 @@ out:
 }
 
 CockpitAuth *
-cockpit_auth_new (gboolean login_loopback)
+cockpit_auth_new (gboolean login_loopback,
+                  CockpitAuthFlags flags)
 {
   CockpitAuth *self = g_object_new (COCKPIT_TYPE_AUTH, NULL);
   const gchar *max_startups_conf;
   gint count = 0;
 
+  self->flags = flags;
   self->login_loopback = login_loopback;
 
   if (cockpit_ws_max_startups == NULL)

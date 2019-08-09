@@ -39,6 +39,7 @@ import {
     delayPolling,
     getAllStoragePools,
     getAllVms,
+    getApiData,
     getHypervisorMaxVCPU,
     getNodeMaxMemory,
     getStoragePool,
@@ -210,24 +211,41 @@ LIBVIRT_PROVIDER = {
         });
     },
 
-    /**
-     * Initiate read of all VMs
-     *
-     * @returns {Function}
-     */
-    GET_ALL_VMS ({ connectionName, libvirtServiceName }) {
+    GET_ALL_VMS({ connectionName }) {
+        const connection = VMS_CONFIG.Virsh.connections[connectionName];
+
+        return dispatch => spawnScript({
+            script: `virsh ${connection.params.join(' ')} -r list --all | awk '$1 == "-" || $1+0 > 0 { print $2 }'`
+        }).then(output => {
+            const vmNames = output.trim().split(/\r?\n/);
+            vmNames.forEach((vmName, index) => {
+                vmNames[index] = vmName.trim();
+            });
+            logDebug(`GET_ALL_VMS: vmNames: ${JSON.stringify(vmNames)}`);
+
+            // remove undefined domains
+            dispatch(deleteUnlistedVMs(connectionName, vmNames));
+
+            // We can't use Promise.all() here until cockpit is able to dispatch es2015 promises
+            // https://github.com/cockpit-project/cockpit/issues/10956
+            // eslint-disable-next-line cockpit/no-cockpit-all
+            return cockpit.all(vmNames.map((name) => dispatch(getVm({ connectionName, name }))));
+        });
+    },
+
+    GET_API_DATA ({ connectionName, libvirtServiceName }) {
         logDebug(`${this.name}.GET_ALL_VMS(connectionName='${connectionName}'):`);
         if (connectionName) {
             return dispatch => {
                 dispatch(checkLibvirtStatus(libvirtServiceName));
                 startEventMonitor(dispatch, connectionName, libvirtServiceName);
                 dispatch(getNodeMaxMemory(connectionName));
-                doGetAllVms(dispatch, connectionName);
+                dispatch(getAllVms(connectionName));
                 dispatch(getAllStoragePools(connectionName));
             };
         }
 
-        return unknownConnectionName(getAllVms, libvirtServiceName);
+        return unknownConnectionName(getApiData, libvirtServiceName);
     },
 
     GET_NODE_MAX_MEMORY({ connectionName }) {
@@ -263,7 +281,10 @@ LIBVIRT_PROVIDER = {
                             const poolInfoParams = parseStoragePoolInfo(poolInfo);
 
                             dispatch(updateOrAddStoragePool(Object.assign({}, dumpxmlParams, poolInfoParams)));
-                            dispatch(getStorageVolumes({ connectionName, poolName: name }));
+                            if (poolInfoParams.active)
+                                dispatch(getStorageVolumes({ connectionName, poolName: name }));
+                            else
+                                dispatch(updateStorageVolumes({ connectionName, poolName: name, volumes: [] }));
                         });
             }
         };
@@ -272,8 +293,7 @@ LIBVIRT_PROVIDER = {
     GET_STORAGE_VOLUMES({ connectionName, poolName }) {
         logDebug(`${this.name}.GET_STORAGE_VOLUMES(connectionName='${connectionName}', poolName='${poolName}')`);
         const connection = VMS_CONFIG.Virsh.connections[connectionName].params.join(' ');
-        // Caution: output of virsh v1.3.1 (ubuntu-1604) and v3.7.0 differs, the 'grep' unifies it
-        const command = `virsh ${connection} -q pool-refresh ${poolName} && virsh ${connection} -q -r vol-list ${poolName} --details | (grep file || true)`;
+        const command = `virsh ${connection} -q pool-refresh ${poolName} && virsh ${connection} -q -r vol-list ${poolName} --details`;
         let data = '';
         return dispatch => cockpit
                 .script(command, null, { err: "message", environ: ['LC_ALL=en_US.UTF-8'] })
@@ -291,7 +311,8 @@ LIBVIRT_PROVIDER = {
         logDebug(`${this.name}.CREATE_AND_ATTACH_VOLUME("`, connectionName, '", "', poolName, '", "', volumeName, '", "', size, '", "', format, '", "', target, '", "', vmName, '"');
         const connection = VMS_CONFIG.Virsh.connections[connectionName].params.join(' ');
         // Workaround: The "grep" part of the command bellow is a workaround for old version of virsh (1.3.1 , ubuntu-1604), since the "virsh -q vol-create-as" produces extra line there
-        const command = `(virsh ${connection} -q vol-create-as ${poolName} ${volumeName} --capacity ${size}M --format ${format} && virsh ${connection} -q vol-path ${volumeName} --pool ${poolName}) | grep -v 'Vol ${volumeName} created'`;
+        const formatArg = format ? `--format ${format}` : '';
+        const command = `(virsh ${connection} -q vol-create-as ${poolName} ${volumeName} --capacity ${size}M ${formatArg} && virsh ${connection} -q vol-path ${volumeName} --pool ${poolName}) | grep -v 'Vol ${volumeName} created'`;
         logDebug('CREATE_AND_ATTACH_VOLUME command: ', command);
         return dispatch => cockpit.script(command, null, { err: "message", environ: ['LC_ALL=en_US.UTF-8'] })
                 .then(() => {
@@ -309,7 +330,8 @@ LIBVIRT_PROVIDER = {
                 .then((volPath) => {
                     let scope = permanent ? '--config' : '';
                     scope = scope + (hotplug ? ' --live' : '');
-                    const command = `virsh ${connection} attach-disk ${vmName} --driver qemu --subdriver ${format} ${volPath.trim()} ${target} ${scope}`;
+                    const subdriver = (format && ['qcow2', 'raw'].includes(format)) ? `--subdriver ${format}` : '';
+                    const command = `virsh ${connection} attach-disk ${vmName} --driver qemu ${subdriver} ${volPath.trim()} ${target} ${scope}`;
 
                     logDebug('ATTACH_DISK command: ', command);
                     return cockpit.script(command, null, { err: "message", environ: ['LC_ALL=en_US.UTF-8'] });
@@ -381,7 +403,12 @@ LIBVIRT_PROVIDER = {
             if (options.destroy) {
                 return destroy().then(undefine);
             } else {
-                return undefine();
+                return undefine()
+                        .catch(ex => {
+                            // Transient domains get undefined after shut off
+                            if (!ex.message.includes("failed to get domain"))
+                                return cockpit.reject(ex);
+                        });
             }
         };
     },
@@ -422,28 +449,6 @@ LIBVIRT_PROVIDER = {
         return unknownConnectionName(getHypervisorMaxVCPU);
     }
 };
-
-function doGetAllVms (dispatch, connectionName) {
-    const connection = VMS_CONFIG.Virsh.connections[connectionName];
-
-    return spawnScript({
-        script: `virsh ${connection.params.join(' ')} -r list --all | awk '$1 == "-" || $1+0 > 0 { print $2 }'`
-    }).then(output => {
-        const vmNames = output.trim().split(/\r?\n/);
-        vmNames.forEach((vmName, index) => {
-            vmNames[index] = vmName.trim();
-        });
-        logDebug(`GET_ALL_VMS: vmNames: ${JSON.stringify(vmNames)}`);
-
-        // remove undefined domains
-        dispatch(deleteUnlistedVMs(connectionName, vmNames));
-
-        // We can't use Promise.all() here until cockpit is able to dispatch es2015 promises
-        // https://github.com/cockpit-project/cockpit/issues/10956
-        // eslint-disable-next-line cockpit/no-cockpit-all
-        return cockpit.all(vmNames.map((name) => dispatch(getVm({ connectionName, name }))));
-    });
-}
 
 // TODO: add configurable custom virsh attribs - i.e. libvirt user/pwd
 function spawnVirsh({ connectionName, method, failHandler, args }) {
@@ -563,7 +568,7 @@ function parseStorageVolumes(dispatch, connectionName, poolName, volumes) {
                 .filter(volume => !!volume) // non-empty lines
                 .map(volume => {
                     const fields = volume.split(/\s\s+/); // two spaces at least; lowers chance for bug with spaces in the volume name
-                    if (fields.length < 3 || fields[2] !== 'file') {
+                    if (fields.length < 3 || fields[2] === 'dir') {
                         // skip 'dir' type; use just flatten dir-pool structure
                         return null;
                     }
@@ -709,7 +714,7 @@ function startEventMonitor(dispatch, connectionName, libvirtServiceName) {
                 logDebug("virsh event failed:", ex);
                 dispatch(checkLibvirtStatus(libvirtServiceName));
                 dispatch(deleteUnlistedVMs(connectionName, []));
-                dispatch(delayPolling(getAllVms(connectionName, libvirtServiceName)));
+                dispatch(delayPolling(getApiData(connectionName, libvirtServiceName)));
             });
 }
 

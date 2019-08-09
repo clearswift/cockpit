@@ -21,11 +21,12 @@ import { Button, Modal } from 'patternfly-react';
 import cockpit from 'cockpit';
 
 import * as Select from "cockpit-components-select.jsx";
-import { ModalError } from './notification/inlineNotification.jsx';
+import { ModalError } from 'cockpit-components-inline-notification.jsx';
 import { units, convertToUnit, digitFilter, toFixedPrecision } from '../helpers.js';
 import { volumeCreateAndAttach, attachDisk, getVm, getAllStoragePools } from '../actions/provider-actions.js';
 
 import 'form-layout.less';
+import './diskAdd.css';
 
 const _ = cockpit.gettext;
 
@@ -49,7 +50,7 @@ function getFilteredVolumes(vmStoragePool, disks) {
             .filter(target => disks[target].source && (disks[target].source.file || disks[target].source.volume))
             .map(target => (disks[target].source && (disks[target].source.file || disks[target].source.volume)));
 
-    const filteredVolumes = vmStoragePool.filter(volume => !usedDiskPaths.includes(volume.path) && !usedDiskPaths.includes(volume.name));
+    const filteredVolumes = vmStoragePool.volumes.filter(volume => !usedDiskPaths.includes(volume.path) && !usedDiskPaths.includes(volume.name));
 
     const filteredVolumesSorted = filteredVolumes.sort(function(a, b) {
         return a.name.localeCompare(b.name);
@@ -58,8 +59,8 @@ function getFilteredVolumes(vmStoragePool, disks) {
     return filteredVolumesSorted;
 }
 
-const SelectExistingVolume = ({ idPrefix, dialogValues, onValueChanged, vmStoragePools, vmDisks }) => {
-    const vmStoragePool = vmStoragePools[dialogValues.storagePoolName];
+const SelectExistingVolume = ({ idPrefix, storagePoolName, existingVolumeName, onValueChanged, vmStoragePools, vmDisks }) => {
+    const vmStoragePool = vmStoragePools.find(pool => pool.name == storagePoolName);
     const filteredVolumes = getFilteredVolumes(vmStoragePool, vmDisks);
 
     let initiallySelected;
@@ -72,7 +73,7 @@ const SelectExistingVolume = ({ idPrefix, dialogValues, onValueChanged, vmStorag
                 </Select.SelectEntry>
             );
         });
-        initiallySelected = dialogValues.existingVolumeName;
+        initiallySelected = existingVolumeName;
     } else {
         content = (
             <Select.SelectEntry data="empty" key="empty-list">
@@ -98,7 +99,7 @@ const SelectExistingVolume = ({ idPrefix, dialogValues, onValueChanged, vmStorag
     );
 };
 
-const PermanentChange = ({ idPrefix, onValueChanged, dialogValues, provider, vm }) => {
+const PermanentChange = ({ idPrefix, onValueChanged, permanent, provider, vm }) => {
     // By default for a running VM, the disk is attached until shut down only. Enable permanent change of the domain.xml
     if (!provider.isRunning(vm.state)) {
         return null;
@@ -110,7 +111,7 @@ const PermanentChange = ({ idPrefix, onValueChanged, dialogValues, provider, vm 
             <label className='checkbox-inline'>
                 <input id={`${idPrefix}-permanent`}
                        type="checkbox"
-                       checked={dialogValues.permanent}
+                       checked={permanent}
                        onChange={e => onValueChanged('permanent', e.target.checked)} />
                 {_("Always attach")}
             </label>
@@ -118,7 +119,7 @@ const PermanentChange = ({ idPrefix, onValueChanged, dialogValues, provider, vm 
     );
 };
 
-const VolumeName = ({ idPrefix, dialogValues, onValueChanged }) => {
+const VolumeName = ({ idPrefix, volumeName, onValueChanged }) => {
     return (
         <React.Fragment>
             <label className='control-label' htmlFor={`${idPrefix}-name`}>
@@ -129,30 +130,59 @@ const VolumeName = ({ idPrefix, dialogValues, onValueChanged }) => {
                    type="text"
                    minLength={1}
                    placeholder={_("New Volume Name")}
-                   value={dialogValues.volumeName || ""}
+                   value={volumeName || ""}
                    onChange={e => onValueChanged('volumeName', e.target.value)} />
         </React.Fragment>
     );
 };
 
-const VolumeDetails = ({ idPrefix, onValueChanged, dialogValues }) => {
+const VolumeDetails = ({ idPrefix, size, unit, diskFileFormat, storagePoolType, onValueChanged }) => {
+    let formatRow;
+    let validVolumeFormats;
+
+    // For the valid volume format types for different pool types see https://libvirt.org/storage.html
+    if (['disk'].indexOf(storagePoolType) > -1) {
+        validVolumeFormats = [
+            'none', 'linux', 'fat16', 'fat32', 'linux-swap', 'linux-lvm',
+            'linux-raid', 'extended'
+        ];
+    } else if (['dir', 'fs', 'netfs', 'gluster', 'vstorage'].indexOf(storagePoolType) > -1) {
+        validVolumeFormats = ['qcow2', 'raw'];
+    }
+
+    if (validVolumeFormats) {
+        formatRow = (
+            <React.Fragment>
+                <label className='control-label' htmlFor={`${idPrefix}-fileformat`}>
+                    {_("Format")}
+                </label>
+                <Select.Select id={`${idPrefix}-diskfileformat`}
+                    onChange={value => onValueChanged('diskFileFormat', value)}
+                    initial={diskFileFormat}
+                    extraClass='form-control ct-form-split'>
+                    { validVolumeFormats.map(format => <Select.SelectEntry data={format} key={format}>{format}</Select.SelectEntry>) }
+                </Select.Select>
+            </React.Fragment>
+        );
+    }
+
     return (
         <React.Fragment>
             <label className='control-label' htmlFor={`${idPrefix}-size`}>
                 {_("Size")}
             </label>
-            <div role="group" className="ct-form-layout-split">
+            <div role="group" className="ct-form-split">
                 <input id={`${idPrefix}-size`}
                        className="form-control add-disk-size"
                        type="number"
-                       value={toFixedPrecision(dialogValues.size)}
+                       value={toFixedPrecision(size)}
                        onKeyPress={digitFilter}
                        step={1}
                        min={0}
                        onChange={e => onValueChanged('size', e.target.value)} />
 
                 <Select.Select id={`${idPrefix}-unit`}
-                               initial={dialogValues.unit}
+                               initial={unit}
                                onChange={value => onValueChanged('unit', value)}>
                     <Select.SelectEntry data={units.MiB.name} key={units.MiB.name}>
                         {_("MiB")}
@@ -162,61 +192,114 @@ const VolumeDetails = ({ idPrefix, onValueChanged, dialogValues }) => {
                     </Select.SelectEntry>
                 </Select.Select>
             </div>
-            <label className='control-label' htmlFor={`${idPrefix}-fileformat`}>
-                {_("Format")}
-            </label>
-            <Select.Select id={`${idPrefix}-diskfileformat`}
-                           onChange={value => onValueChanged('diskFileFormat', value)}
-                           initial={dialogValues.diskFileFormat}
-                           extraClass='form-control ct-form-layout-split'>
-                <Select.SelectEntry data='qcow2' key='qcow2'>
-                    {_("qcow2")}
-                </Select.SelectEntry>
-                <Select.SelectEntry data='raw' key='raw'>
-                    {_("raw")}
-                </Select.SelectEntry>
-            </Select.Select>
+            {formatRow}
         </React.Fragment>
     );
 };
 
-const PoolRow = ({ idPrefix, onValueChanged, dialogValues, vmStoragePools }) => {
+const PoolRow = ({ idPrefix, onValueChanged, storagePoolName, vmStoragePools }) => {
     return (
         <React.Fragment>
             <label className='control-label' htmlFor={`${idPrefix}-select-pool`}>
                 {_("Pool")}
             </label>
             <Select.Select id={`${idPrefix}-select-pool`}
+                           enabled={vmStoragePools.length > 0}
                            onChange={value => onValueChanged('storagePoolName', value)}
-                           initial={dialogValues.storagePoolName}
+                           initial={storagePoolName || _("No Storage Pools available")}
                            extraClass="form-control">
-                {Object.getOwnPropertyNames(vmStoragePools)
-                        .sort((a, b) => a.localeCompare(b))
-                        .map(poolName => {
+                {vmStoragePools.length > 0 ? vmStoragePools
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(pool => {
                             return (
-                                <Select.SelectEntry data={poolName} key={poolName}>
-                                    {poolName}
+                                <Select.SelectEntry disabled={pool.disabled} title={pool.disabled ? _("This pool type does not support Storage Volume creation") : null} data={pool.name} key={pool.name}>
+                                    {pool.name}
                                 </Select.SelectEntry>
                             );
-                        })}
+                        })
+                    : [<Select.SelectEntry data='no-resource' key='no-resource'>
+                        {_("No Storage Pools available")}
+                    </Select.SelectEntry> ]}
             </Select.Select>
         </React.Fragment>
     );
 };
 
+class PerformanceOptions extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { expanded: false };
+    }
+
+    render() {
+        const cacheModes = ['default', 'none', 'writethrough', 'writeback', 'directsync', 'unsafe'];
+
+        return (
+            <React.Fragment>
+                <div className='expand-collapse-pf' id='expand-collapse-button'>
+                    <div className='expand-collapse-pf-link-container'>
+                        <button className='btn btn-link' onClick={() => this.setState({ expanded: !this.state.expanded })}>
+                            { this.state.expanded ? <span className='fa fa-angle-down' /> : <span className='fa fa-angle-right' /> }
+                            { this.state.expanded ? _("Hide Performance Options") : _("Show Performance Options")}
+                        </button>
+                        <span className="expand-collapse-pf-separator bordered" />
+                    </div>
+                </div>
+
+                {this.state.expanded && <React.Fragment>
+                    <label className='control-label' htmlFor='cache-mode'>
+                        {_("Cache")}
+                    </label>
+                    <Select.Select id={'cache-mode'}
+                        onChange={value => this.props.onValueChanged('cacheMode', value)}
+                        initial={this.props.cacheMode}
+                        extraClass='form-control ct-form-split'>
+                        {cacheModes.map(cacheMode => {
+                            return (
+                                <Select.SelectEntry data={cacheMode} key={cacheMode}>
+                                    {cacheMode}
+                                </Select.SelectEntry>
+                            );
+                        })}
+                    </Select.Select>
+                </React.Fragment>}
+            </React.Fragment>
+        );
+    }
+}
+
 const CreateNewDisk = ({ idPrefix, onValueChanged, dialogValues, vmStoragePools, provider, vm }) => {
+    const storagePool = vmStoragePools.find(pool => pool.name == dialogValues.storagePoolName);
+    const poolTypesNotSupportingVolumeCreation = ['iscsi', 'iscsi-direct', 'gluster', 'mpath'];
+
     return (
         <React.Fragment>
             <hr />
             <PoolRow idPrefix={idPrefix}
-                     dialogValues={dialogValues}
+                     storagePoolName={dialogValues.storagePoolName}
                      onValueChanged={onValueChanged}
-                     vmStoragePools={vmStoragePools} />
-            <hr />
-            <VolumeName idPrefix={idPrefix} dialogValues={dialogValues} onValueChanged={onValueChanged} />
-            <VolumeDetails idPrefix={idPrefix} dialogValues={dialogValues} onValueChanged={onValueChanged} />
-            <hr />
-            <PermanentChange idPrefix={idPrefix} dialogValues={dialogValues} onValueChanged={onValueChanged} provider={provider} vm={vm} />
+                     vmStoragePools={vmStoragePools.map(pool => ({ ...pool, disabled: poolTypesNotSupportingVolumeCreation.includes(pool.type) }))} />
+            {storagePool &&
+            <React.Fragment>
+                <hr />
+                <VolumeName idPrefix={idPrefix}
+                            volumeName={dialogValues.volumeName}
+                            onValueChanged={onValueChanged} />
+                <VolumeDetails idPrefix={idPrefix}
+                               size={dialogValues.size}
+                               unit={dialogValues.unit}
+                               diskFileFormat={dialogValues.diskFileFormat}
+                               storagePoolType={storagePool.type}
+                               onValueChanged={onValueChanged} />
+                <hr />
+                <PermanentChange idPrefix={idPrefix}
+                                 permanent={dialogValues.permanent}
+                                 onValueChanged={onValueChanged}
+                                 provider={provider}
+                                 vm={vm} />
+                {provider.name == 'LibvirtDBus' && <PerformanceOptions cacheMode={dialogValues.cacheMode}
+                                    onValueChanged={onValueChanged} />}
+            </React.Fragment>}
         </React.Fragment>
     );
 };
@@ -226,13 +309,27 @@ const UseExistingDisk = ({ idPrefix, onValueChanged, dialogValues, vmStoragePool
         <React.Fragment>
             <hr />
             <PoolRow idPrefix={idPrefix}
-                     dialogValues={dialogValues}
+                     storagePoolName={dialogValues.storagePoolName}
                      onValueChanged={onValueChanged}
                      vmStoragePools={vmStoragePools} />
             <hr />
-            <SelectExistingVolume idPrefix={idPrefix} dialogValues={dialogValues} onValueChanged={onValueChanged} vmStoragePools={vmStoragePools} vmDisks={vm.disks} />
-            <hr />
-            <PermanentChange idPrefix={idPrefix} dialogValues={dialogValues} onValueChanged={onValueChanged} provider={provider} vm={vm} />
+            {vmStoragePools.length > 0 &&
+            <React.Fragment>
+                <SelectExistingVolume idPrefix={idPrefix}
+                                      storagePoolName={dialogValues.storagePoolName}
+                                      existingVolumeName={dialogValues.existingVolumeName}
+                                      onValueChanged={onValueChanged}
+                                      vmStoragePools={vmStoragePools}
+                                      vmDisks={vm.disks} />
+                <hr />
+                <PermanentChange idPrefix={idPrefix}
+                                 permanent={dialogValues.PermanentChange}
+                                 onValueChanged={onValueChanged}
+                                 provider={provider}
+                                 vm={vm} />
+                {provider.name == 'LibvirtDBus' && <PerformanceOptions cacheMode={dialogValues.cacheMode}
+                                    onValueChanged={onValueChanged} />}
+            </React.Fragment>}
         </React.Fragment>
     );
 };
@@ -262,16 +359,8 @@ export class AddDiskAction extends React.Component {
     render() {
         const { vm, storagePools, provider, dispatch } = this.props;
         const idPrefix = `${this.props.idPrefix}-adddisk`;
-        /*
-         * For now only Storage Pools of dir type are supported.
-         * TODO: Add support for other Storage Pool types.
-         */
         const filteredStoragePools = storagePools
-                .filter(pool => pool.connectionName == vm.connectionName && pool.active && pool.type == 'dir')
-                .reduce((result, filter) => {
-                    result[filter.name] = filter.volumes;
-                    return result;
-                }, {});
+                .filter(pool => pool.active);
 
         return (
             <div id={`${idPrefix}-add-dialog-full`}>
@@ -292,46 +381,93 @@ class AddDiskModalBody extends React.Component {
         this.dialogErrorSet = this.dialogErrorSet.bind(this);
         this.onAddClicked = this.onAddClicked.bind(this);
         this.getDefaultVolumeName = this.getDefaultVolumeName.bind(this);
+        this.getDefaultVolumeFormat = this.getDefaultVolumeFormat.bind(this);
+    }
+
+    getDefaultVolumeFormat(pool) {
+        // For the valid volume format types for different pool types see https://libvirt.org/storage.html
+        if (['disk'].indexOf(pool.type) > -1)
+            return 'none';
+
+        if (['dir', 'fs', 'netfs', 'gluster', 'vstorage'].indexOf(pool.type) > -1)
+            return 'qcow2';
+
+        return undefined;
     }
 
     get initialState() {
         const { vm, storagePools, provider } = this.props;
         const availableTarget = getNextAvailableTarget(vm);
+        const sortFunction = (poolA, poolB) => poolA.name.localeCompare(poolB.name);
+        let defaultPool;
+        if (storagePools.length > 0)
+            defaultPool = storagePools
+                    .map(pool => ({ name: pool.name, type: pool.type }))
+                    .sort(sortFunction)[0];
 
         return {
-            storagePoolName: storagePools && Object.getOwnPropertyNames(storagePools).sort()[0],
+            storagePoolName: defaultPool && defaultPool.name,
             mode: CREATE_NEW,
             volumeName: undefined,
             existingVolumeName: undefined,
             size: 1,
             unit: units.GiB.name,
-            diskFileFormat: 'qcow2',
+            diskFileFormat: defaultPool && this.getDefaultVolumeFormat(defaultPool),
             target: availableTarget,
             permanent: !provider.isRunning(vm.state), // default true for a down VM; for a running domain, the disk is attached tentatively only
             hotplug: provider.isRunning(vm.state), // must be kept false for a down VM; the value is not being changed by user
+            addDiskInProgress: false,
+            cacheMode: 'default',
         };
     }
 
     getDefaultVolumeName(poolName) {
         const { storagePools, vm } = this.props;
-        const vmStoragePool = storagePools[poolName];
+        const vmStoragePool = storagePools.find(pool => pool.name == poolName);
         const filteredVolumes = getFilteredVolumes(vmStoragePool, vm.disks);
         return filteredVolumes[0] && filteredVolumes[0].name;
     }
 
     onValueChanged(key, value) {
-        const stateDelta = { [key]: value };
+        let stateDelta = {};
 
-        if (key === 'storagePoolName' && this.state.mode === USE_EXISTING) { // user changed pool
-            stateDelta.existingVolumeName = this.getDefaultVolumeName(value);
+        switch (key) {
+        case 'storagePoolName': {
+            this.setState({ storagePoolName: value });
+            if (this.state.mode === USE_EXISTING) { // user changed pool
+                this.onValueChanged('existingVolumeName', this.getDefaultVolumeName(value));
+            }
+            break;
         }
-
-        if (key === 'mode' && value === USE_EXISTING) { // user moved to USE_EXISTING subtab
-            const poolName = this.state.storagePoolName;
-            stateDelta.existingVolumeName = this.getDefaultVolumeName(poolName);
+        case 'existingVolumeName': {
+            stateDelta.existingVolumeName = value;
+            this.setState(prevState => { // to prevent asynchronous for recursive call with existingVolumeName as a key
+                const { storagePools, vm } = this.props;
+                const pool = storagePools.find(pool => pool.name === prevState.storagePoolName && pool.connectionName === vm.connectionName);
+                stateDelta.diskFileFormat = this.getDefaultVolumeFormat(pool);
+                if (['dir', 'fs', 'netfs', 'gluster', 'vstorage'].indexOf(pool.type) > -1) {
+                    const volume = pool.volumes.find(vol => vol.name === value);
+                    if (volume && volume.format)
+                        stateDelta.diskFileFormat = volume.format;
+                }
+                return stateDelta;
+            });
+            break;
         }
-
-        this.setState(stateDelta);
+        case 'mode': {
+            stateDelta = this.initialState;
+            if (value === USE_EXISTING) { // user moved to USE_EXISTING subtab
+                stateDelta.mode = value;
+                const poolName = this.state.storagePoolName;
+                if (poolName)
+                    stateDelta.existingVolumeName = this.getDefaultVolumeName(poolName);
+            }
+            this.setState(stateDelta);
+            break;
+        }
+        default:
+            this.setState({ [key]: value });
+        }
     }
 
     dialogErrorSet(text, detail) {
@@ -350,6 +486,7 @@ class AddDiskModalBody extends React.Component {
                 return this.dialogErrorSet(_("Please enter new volume size"));
             }
 
+            this.setState({ addDiskInProgress: true });
             // create new disk
             return dispatch(volumeCreateAndAttach({ connectionName: vm.connectionName,
                                                     poolName: this.state.storagePoolName,
@@ -360,8 +497,12 @@ class AddDiskModalBody extends React.Component {
                                                     permanent: this.state.permanent,
                                                     hotplug: this.state.hotplug,
                                                     vmName: vm.name,
-                                                    vmId: vm.id }))
-                    .fail(exc => this.dialogErrorSet(_("Disk failed to be created"), exc.message))
+                                                    vmId: vm.id,
+                                                    cacheMode: this.state.cacheMode }))
+                    .fail(exc => {
+                        this.setState({ addDiskInProgress: false });
+                        this.dialogErrorSet(_("Disk failed to be created"), exc.message);
+                    })
                     .then(() => { // force reload of VM data, events are not reliable (i.e. for a down VM)
                         this.props.close();
                         return dispatch(getVm({ connectionName: vm.connectionName, name: vm.name, id: vm.id }));
@@ -377,8 +518,12 @@ class AddDiskModalBody extends React.Component {
                                      permanent: this.state.permanent,
                                      hotplug: this.state.hotplug,
                                      vmName: vm.name,
-                                     vmId: vm.id }))
-                .fail(exc => this.dialogErrorSet(_("Disk failed to be attached"), exc.message))
+                                     vmId: vm.id,
+                                     cacheMode: this.state.cacheMode }))
+                .fail(exc => {
+                    this.setState({ addDiskInProgress: false });
+                    this.dialogErrorSet(_("Disk failed to be attached"), exc.message);
+                })
                 .then(() => { // force reload of VM data, events are not reliable (i.e. for a down VM)
                     this.props.close();
                     return dispatch(getVm({ connectionName: vm.connectionName, name: vm.name, id: vm.id }));
@@ -387,11 +532,11 @@ class AddDiskModalBody extends React.Component {
 
     render() {
         const { vm, storagePools, provider } = this.props;
+        const storagePoolsFiltered = storagePools.filter(pool => pool != undefined);
         const idPrefix = `${this.props.idPrefix}-adddisk`;
-        const vmStoragePools = storagePools;
 
         const defaultBody = (
-            <div className='ct-form-layout'>
+            <div className='ct-form'>
                 <label className='control-label' htmlFor={`${idPrefix}-source`}>
                     {_("Source")}
                 </label>
@@ -421,7 +566,7 @@ class AddDiskModalBody extends React.Component {
                     <CreateNewDisk idPrefix={`${idPrefix}-new`}
                                    onValueChanged={this.onValueChanged}
                                    dialogValues={this.state}
-                                   vmStoragePools={vmStoragePools}
+                                   vmStoragePools={storagePoolsFiltered}
                                    provider={provider}
                                    vm={vm} />
                 )}
@@ -429,7 +574,7 @@ class AddDiskModalBody extends React.Component {
                     <UseExistingDisk idPrefix={`${idPrefix}-existing`}
                                      onValueChanged={this.onValueChanged}
                                      dialogValues={this.state}
-                                     vmStoragePools={vmStoragePools}
+                                     vmStoragePools={storagePoolsFiltered}
                                      provider={provider}
                                      vm={vm} />
                 )}
@@ -447,10 +592,11 @@ class AddDiskModalBody extends React.Component {
                 </Modal.Body>
                 <Modal.Footer>
                     {this.state.dialogError && <ModalError dialogError={this.state.dialogError} dialogErrorDetail={this.state.dialogErrorDetail} />}
+                    {this.state.addDiskInProgress && <div className="spinner spinner-sm pull-left" />}
                     <Button id={`${idPrefix}-dialog-cancel`} bsStyle='default' className='btn-cancel' onClick={this.props.close}>
                         {_("Cancel")}
                     </Button>
-                    <Button id={`${idPrefix}-dialog-add`} bsStyle='primary' onClick={this.onAddClicked}>
+                    <Button id={`${idPrefix}-dialog-add`} bsStyle='primary' disabled={this.state.addDiskInProgress || storagePools.length == 0} onClick={this.onAddClicked}>
                         {_("Add")}
                     </Button>
                 </Modal.Footer>

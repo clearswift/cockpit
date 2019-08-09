@@ -19,6 +19,10 @@
 import { mustache } from "mustache";
 import $ from "jquery";
 
+import React from "react";
+import ReactDOM from "react-dom";
+import { OnOffSwitch } from "cockpit-components-onoff.jsx";
+
 import "polyfills.js";
 import cockpit from "cockpit";
 import * as machine_info from "machine-info.js";
@@ -230,6 +234,16 @@ PageServer.prototype = {
         return null;
     },
 
+    relayout: function() {
+        var self = this;
+        if (self.cpu_plot) {
+            self.cpu_plot.resize();
+            self.memory_plot.resize();
+            self.network_plot.resize();
+            self.disk_plot.resize();
+        }
+    },
+
     setup: function() {
         var self = this;
         update_hostname_privileged();
@@ -375,15 +389,7 @@ PageServer.prototype = {
         var pmlogger_exists = false;
         var packagekit_exists = false;
 
-        function disable_logger_switch() {
-            $("#server-pmlogger-switch label").addClass("disabled");
-        }
-
-        function enable_logger_switch() {
-            $("#server-pmlogger-switch label").removeClass("disabled");
-        }
-
-        function update_pmlogger_row() {
+        function update_pmlogger_row(force_disable) {
             var logger_switch = $("#server-pmlogger-switch");
             var enable_pcp = $('#system-information-enable-pcp-link');
             if (!pmlogger_exists) {
@@ -392,14 +398,17 @@ PageServer.prototype = {
                 logger_switch.prev().hide();
             } else if (!pmlogger_promise) {
                 enable_pcp.hide();
-                logger_switch.onoff('value', pmlogger_service.state === "running");
                 logger_switch.show();
                 logger_switch.prev().show();
             }
-            if (pmlogger_service.state === "starting")
-                disable_logger_switch();
-            else
-                enable_logger_switch();
+
+            ReactDOM.render(
+                React.createElement(OnOffSwitch, {
+                    state: pmlogger_service.state === "running",
+                    disabled: pmlogger_service.state == "starting" || force_disable,
+                    onChange: onPmLoggerSwitchChange }),
+                document.getElementById('server-pmlogger-switch')
+            );
         }
 
         function pmlogger_service_changed() {
@@ -417,7 +426,7 @@ PageServer.prototype = {
                         .fail(function() {
                             pmlogger_exists = false;
                         })
-                        .always(update_pmlogger_row);
+                        .always(() => update_pmlogger_row());
             } else {
                 update_pmlogger_row();
             }
@@ -428,12 +437,13 @@ PageServer.prototype = {
             update_pmlogger_row();
         });
 
-        $("#server-pmlogger-switch").on("change", function(ev) {
+        function onPmLoggerSwitchChange(enable) {
             if (!pmlogger_exists)
                 return;
 
-            disable_logger_switch();
-            if ($(this).onoff('value')) {
+            update_pmlogger_row(true);
+
+            if (enable) {
                 pmlogger_promise = Promise.all([
                     pmcd_service.enable(),
                     pmcd_service.start(),
@@ -453,7 +463,7 @@ PageServer.prototype = {
                 pmlogger_promise = null;
                 pmlogger_service_changed();
             });
-        });
+        }
 
         $(pmlogger_service).on('changed', pmlogger_service_changed);
         pmlogger_service_changed();
@@ -506,8 +516,18 @@ PageServer.prototype = {
 
         function check_for_updates() {
             var os_updates = { };
-            self.os_updates = null;
 
+            // skip update check when becoming invisible
+            if (document.visibilityState != "visible")
+                return;
+            const lastCheck = window.sessionStorage.getItem("last_sw_update_check");
+            // check at most once per hour, as this is expensive on embedded machines
+            // this gets reset on applying software updates updates
+            if (self.os_updates && lastCheck && Date.now() - lastCheck < 3600000)
+                return;
+            window.sessionStorage.setItem("last_sw_update_check", Date.now());
+
+            self.os_updates = null;
             packagekit.cancellableTransaction(
                 "GetUpdates", [0],
                 function(data) {
@@ -557,6 +577,7 @@ PageServer.prototype = {
         machine_id.read()
                 .done(function(content) {
                     $("#system_machine_id").text(content);
+                    self.relayout();
                 })
                 .fail(function(ex) {
                     console.error("Error reading machine id", ex);
@@ -722,12 +743,7 @@ PageServer.prototype = {
 
         self.plot_controls.reset([ self.cpu_plot, self.memory_plot, self.network_plot, self.disk_plot ]);
 
-        $(window).on('resize.server', function() {
-            self.cpu_plot.resize();
-            self.memory_plot.resize();
-            self.network_plot.resize();
-            self.disk_plot.resize();
-        });
+        $(window).on('resize.server', () => { self.relayout() });
 
         let asset_tag_text = $("#system_information_asset_tag_text");
         let hardware_text = $("#system_information_hardware_text");
@@ -739,6 +755,7 @@ PageServer.prototype = {
                     asset_tag_text.text(fields.product_serial || fields.chassis_serial);
                     asset_tag_text.toggle(present);
                     asset_tag_text.prev().toggle(present);
+                    self.relayout();
                 })
                 .fail(function(ex) {
                     debug("couldn't read dmi info: " + ex);

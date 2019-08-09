@@ -30,7 +30,7 @@ export const StoragePoolOverviewTab = ({ storagePool }) => {
     const idPrefix = `${storagePoolId(storagePool.name, storagePool.connectionName)}`;
 
     return (
-        <div className='ct-form-layout'>
+        <div className='ct-form'>
             { storagePool.source && storagePool.source.host && <React.Fragment>
                 <label className='control-label' htmlFor={`${idPrefix}-host`}> {_("Host")} </label>
                 <div id={`${idPrefix}-host`}>
@@ -46,6 +46,16 @@ export const StoragePoolOverviewTab = ({ storagePool }) => {
             { storagePool.source && storagePool.source.dir && <React.Fragment>
                 <label className='control-label' htmlFor={`${idPrefix}-source-path`}> {_("Source Path")} </label>
                 <div id={`${idPrefix}-source-path`}> {storagePool.source.dir.path} </div>
+            </React.Fragment> }
+
+            { storagePool.source && storagePool.source.name && <React.Fragment>
+                <label className='control-label' htmlFor={`${idPrefix}-source-path`}> {_("Source")} </label>
+                <div id={`${idPrefix}-source-path`}> {storagePool.source.name} </div>
+            </React.Fragment> }
+
+            { storagePool.source && storagePool.source.format && <React.Fragment>
+                <label className='control-label' htmlFor={`${idPrefix}-source-format`}> {_("Source Format")} </label>
+                <div id={`${idPrefix}-source-format`}> {storagePool.source.format.type} </div>
             </React.Fragment> }
 
             { storagePool.target && storagePool.target.path && <React.Fragment>

@@ -26,7 +26,6 @@ GUIDE_INCLUDES = \
 	doc/guide/feature-docker.xml \
 	doc/guide/feature-firewall.xml \
 	doc/guide/feature-journal.xml \
-	doc/guide/feature-kubernetes.xml \
 	doc/guide/feature-machines.xml \
 	doc/guide/feature-networkmanager.xml \
 	doc/guide/feature-packagekit.xml \
@@ -35,13 +34,11 @@ GUIDE_INCLUDES = \
 	doc/guide/feature-selinux.xml \
 	doc/guide/feature-sosreport.xml \
 	doc/guide/feature-storaged.xml \
-	doc/guide/feature-subscription.xml \
 	doc/guide/feature-systemd.xml \
 	doc/guide/feature-terminal.xml \
 	doc/guide/feature-tuned.xml \
 	doc/guide/feature-users.xml \
 	doc/guide/feature-virtualmachines.xml \
-	doc/guide/feature-ovirt.xml \
 	doc/guide/packages.xml \
 	doc/guide/privileges.xml \
 	doc/guide/https.xml \
@@ -65,7 +62,7 @@ GUIDE_XSLT = \
 	doc/guide/version-greater-or-equal.xsl \
 	$(NULL)
 
-GUIDE_FONTS = $(subst dist/fonts/,dist/guide/html/,$(OPENSANS_FONTS))
+GUIDE_FONTS = $(subst dist/static/fonts/,dist/guide/html/,$(REDHATTEXT_FONTS))
 
 EXTRA_DIST += \
 	$(GUIDE_DOCBOOK) \
@@ -92,7 +89,7 @@ MAINTAINERCLEANFILES += \
 	*.tmp \
 	$(NULL)
 
-dist/guide/html/%.woff: dist/fonts/%.woff
+dist/guide/html/%.woff2: dist/static/fonts/%.woff2
 	$(COPY_RULE)
 
 dist/guide/html/index.html: $(GUIDE_DOCBOOK) $(GUIDE_INCLUDES) $(man_MANS) $(GUIDE_STATIC) $(GUIDE_XSLT) $(GUIDE_FONTS)

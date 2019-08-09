@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 # This file is part of Cockpit.
 #
@@ -39,6 +38,12 @@ task = imp.load_source("task", os.path.join(BASE, "__init__.py"))
 DATA = {
     "/repos/project/repo/issues/3333": {
         "title": "The issue title"
+    },
+    "/repos/project/repo/pulls/1234": {
+        "title": "Task title",
+        "number": 1234,
+        "body": "This is the body",
+        "head": {"sha": "abcdef"},
     },
     "/users/user/repos": [{"full_name": "project/repo"}]
 }
@@ -80,6 +85,7 @@ def mockServer():
                 data = json.loads(self.rfile.read(content_len).decode('utf-8'))
                 data["number"] = 1234
                 data["body"] = "This is the body"
+                data["head"] = {"sha": "abcde"}
                 self.replyJson(data)
             elif self.path == "/repos/project/repo/issues/1234/comments":
                 content_len = int(self.headers.get('content-length'))

@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,11 +21,13 @@ import parent
 from netlib import *
 from testlib import *
 
+from machine_core.constants import TEST_OS_DEFAULT
+
 
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": {},
-        "machine2": {"image": "fedora-29", "address": "10.111.113.2/20", "dhcp": True}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True}
     }
 
     def testVlan(self):
@@ -41,10 +42,8 @@ class TestNetworking(NetworkCase):
         # Make a VLAN interface
         b.click("button:contains('Add VLAN')")
         b.wait_popup("network-vlan-settings-dialog")
-        if m.image == "rhel-7-6-distropkg":
-            b.click("#network-vlan-settings-dialog tr:contains('Parent') li[value='%s'] a" % iface, True)
-        else:
-            b.click("#network-vlan-settings-body form div ul li[value='%s'] a" % iface, True)
+        b.click("#network-vlan-settings-body form .btn-group button")
+        b.click("#network-vlan-settings-body form div ul li[value='%s'] a" % iface)
         b.set_val("#network-vlan-settings-interface-name-input", "tvlan")
         b.set_val("#network-vlan-settings-vlan-id-input", "123")
         b.click("#network-vlan-settings-dialog button:contains('Apply')")
@@ -61,7 +60,6 @@ class TestNetworking(NetworkCase):
 
         # Delete it
         b.click("#networking-interfaces tr[data-interface='tvlan'] td:first-child")
-        b.wait_visible("#network-interface")
         b.click("#network-interface button:contains('Delete')")
         b.wait_visible("#networking")
         b.wait_not_present("#networking-interfaces tr[data-interface='tvlan']")

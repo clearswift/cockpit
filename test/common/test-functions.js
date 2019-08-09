@@ -61,6 +61,17 @@ function ph_has_val (sel, val)
     return ph_val(sel) == val;
 }
 
+function ph_collected_text_is (sel, val)
+{
+    var els = ph_select(sel);
+    var rest = els.map(el => {
+        if (el.textContent === undefined)
+            throw sel + " can not have text";
+        return el.textContent.replace(/\xa0/g, " ")
+    }).join("");
+    return rest === val;
+}
+
 function ph_text (sel)
 {
     var el = ph_find(sel);
@@ -98,11 +109,11 @@ function ph_attr_contains (sel, attr, val)
     return ph_attr(sel, attr).indexOf(val) > -1;
 }
 
-function ph_mouse(sel, type, x, y, btn, force) {
+function ph_mouse(sel, type, x, y, btn, ctrlKey, shiftKey, altKey, metaKey) {
     let el = ph_find(sel);
 
     /* The element has to be visible, and not collapsed */
-    if (!force && el.offsetWidth <= 0 && el.offsetHeight <= 0)
+    if (el.offsetWidth <= 0 && el.offsetHeight <= 0)
         throw sel + " is not visible";
 
     /* The event has to actually work */
@@ -137,7 +148,11 @@ function ph_mouse(sel, type, x, y, btn, force) {
         screenY: top + y,
         clientX: left + x,
         clientY: top + y,
-        button: btn
+        button: btn,
+        ctrlKey: ctrlKey || false,
+        shiftKey: shiftKey || false,
+        altKey: altKey || false,
+        metaKey: metaKey || false
     });
 
     el.dispatchEvent(ev);
@@ -156,7 +171,7 @@ function ph_set_checked (sel, val)
         throw sel + " is not checkable";
 
     if (el.checked != val)
-        ph_mouse(sel, "click", 0, 0, 0, true);
+        ph_mouse(sel, "click", 0, 0, 0);
 }
 
 function ph_is_visible (sel)

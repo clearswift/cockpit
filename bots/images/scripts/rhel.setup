@@ -26,19 +26,6 @@ df -Th /
 # all actions regarding the repositories will be skipped:
 # subscriptions, adding repos, deleting existing entries
 SKIP_REPO_FLAG="/root/.skip_repos"
-SUBSCRIBED=
-
-if [ "$IMAGE" != "rhel-8-0" ] && [ "$IMAGE" != "rhel-8-1" ] && [ ! -f "$SKIP_REPO_FLAG" ]; then
-    # Remove any internal files
-    rm -f /etc/yum.repos.d/download.devel.redhat.com.repo
-
-    # register system
-    subscription-manager register --auto-attach --username=`cat ~/.rhel/login` --password=`cat ~/.rhel/pass`
-    # remove credentials from test machine
-    rm -rf ~/.rhel
-    SUBSCRIBED=1
-fi
-
 
 # Only start logging here.  Otherwise the subscription credentials
 # appear in the output above.
@@ -48,30 +35,64 @@ set -x
 if [ ! -f "$SKIP_REPO_FLAG" ]; then
     # Configure repositories.
 
-    if [ "$IMAGE" = "rhel-7-6" ]; then
-        # if disabling the repos doesn't work, do without
-        $YUM_INSTALL --disablerepo=rhel-7-server-htb-rpms --disablerepo=rhel-sjis-for-rhel-7-server-rpms yum-utils || $YUM_INSTALL yum-utils
-        yum-config-manager --enable rhel-7-server-optional-rpms
-        yum-config-manager --enable rhel-7-server-extras-rpms
-
-    elif [ "$IMAGE" = "rhel-7-7" ]; then
-        # HACK: No Extras 7.7 nightly repo yet
-cat <<EOF > /etc/yum.repos.d/nightly.repo
-[EXTRAS-7.6-LATEST]
-name=rhel-extras-compose
-#baseurl=http://download.devel.redhat.com/nightly/EXTRAS-RHEL-7.7/latest-EXTRAS-7.7-RHEL-7/compose/Server/x86_64/os/
-baseurl=http://download.devel.redhat.com/rhel-7/rel-eng/EXTRAS-7/latest-EXTRAS-7.6-RHEL-7/compose/Server/x86_64/os/
+    if [ "$IMAGE" = "rhel-7-7" ]; then
+        # disable all default repos
+        rm -f --verbose /etc/yum.repos.d/*.repo
+cat <<EOF > /etc/yum.repos.d/internal.repo
+[RHEL-7.7]
+name=base-rhel
+baseurl=http://download.devel.redhat.com/rhel-7/rel-eng/latest-RHEL-7.7/compose/Server/x86_64/os
 enabled=1
 gpgcheck=0
 
-[RHEL-7.7-NIGHTLY]
+[EXTRAS-7.7-LATEST]
+name=rhel-extras-compose
+baseurl=http://download.devel.redhat.com/rhel-7/rel-eng/latest-EXTRAS-7.7-RHEL-7/compose/Server/x86_64/os/
+enabled=1
+gpgcheck=0
+
+[RHEL-7.7-DEBUG]
+name=base-rhel-debug
+baseurl=http://download-ipv4.eng.brq.redhat.com/rhel-7/rel-eng/latest-RHEL-7.7/compose/Server/x86_64/debug/tree/
+enabled=0
+gpgcheck=0
+
+[EXTRAS-7.7-DEBUG]
+name=rhel-extras-compose-debug
+baseurl=http://download.devel.redhat.com/rhel-7/rel-eng/latest-EXTRAS-7.7-RHEL-7/compose/Server/x86_64/debug/tree/
+enabled=0
+gpgcheck=0
+EOF
+        $YUM_INSTALL yum-utils
+
+    elif [ "$IMAGE" = "rhel-7-8" ]; then
+        # disable all default repos
+        rm -f --verbose /etc/yum.repos.d/*.repo
+cat <<EOF > /etc/yum.repos.d/nightly.repo
+[RHEL-7.8]
 name=base-rhel
 baseurl=http://download.devel.redhat.com/nightly/latest-RHEL-7/compose/Server/x86_64/os
 enabled=1
 gpgcheck=0
+
+[EXTRAS-7.8]
+name=rhel-extras-compose
+baseurl=http://download.devel.redhat.com/rhel-7/nightly/EXTRAS-7/latest-EXTRAS-7.8-RHEL-7/compose/Server/x86_64/os
+enabled=1
+gpgcheck=0
+
+[RHEL-7.8-DEBUG]
+name=base-rhel-debug
+baseurl=http://download.devel.redhat.com/nightly/latest-RHEL-7/compose/Server/x86_64/debug/tree
+enabled=0
+gpgcheck=0
+
+[EXTRAS-7.8-DEBUG]
+name=rhel-extras-compose-debug
+baseurl=http://download.devel.redhat.com/rhel-7/nightly/EXTRAS-7/latest-EXTRAS-7.8-RHEL-7/compose/Server/x86_64/debug/tree
+enabled=0
+gpgcheck=0
 EOF
-        # disable all default repos as they don't exist yet
-        sed -i 's/enabled = 1/enabled = 0/' /etc/yum.repos.d/redhat.repo
         $YUM_INSTALL yum-utils
 
     elif [ "${IMAGE#rhel-8*}" != "$IMAGE" ]; then
@@ -91,6 +112,18 @@ gpgcheck=0
 name=appstream
 baseurl=http://download.devel.redhat.com/rhel-8/nightly/RHEL-8/$REPO/compose/AppStream/x86_64/os/
 enabled=1
+gpgcheck=0
+
+[RHEL-8-NIGHTLY-BaseOS-Debug]
+name=baseos-debug
+baseurl=http://download-ipv4.eng.brq.redhat.com/rhel-8/nightly/RHEL-8/$REPO/compose/BaseOS/x86_64/debug/tree/
+enabled=0
+gpgcheck=0
+
+[RHEL-8-NIGHTLY-AppStream-Debug]
+name=appstream-debug
+baseurl=http://download-ipv4.eng.brq.redhat.com/rhel-8/nightly/RHEL-8/$REPO/compose/AppStream/x86_64/debug/tree/
+enabled=0
 gpgcheck=0
 EOF
         # make ipa-client available
@@ -121,6 +154,7 @@ json-glib \
 kexec-tools \
 libssh \
 libvirt-client \
+libvirt-daemon-kvm \
 NetworkManager-team \
 openssl \
 PackageKit \
@@ -156,8 +190,10 @@ nmap-ncat \
 targetcli \
 yum-utils \
 virt-install \
+libvirt-daemon-config-network \
 cryptsetup \
 qemu-kvm \
+socat \
 vdo \
 kmod-kvdo \
 dracut-fips \
@@ -170,8 +206,10 @@ if [ "$IMAGE" = "centos-7" ]; then
     COCKPIT_DEPS="${COCKPIT_DEPS/redhat-logos/}"
 fi
 if [ "${IMAGE#rhel-7}" != "$IMAGE" ] || [ "$IMAGE" == "centos-7" ]; then
-    COCKPIT_DEPS="$COCKPIT_DEPS libvirt"
     COCKPIT_DEPS="$COCKPIT_DEPS kubernetes-client"
+fi
+if [ "$IMAGE" = "rhel-7-7" ]; then
+    COCKPIT_DEPS="$COCKPIT_DEPS libvirt-dbus"
 fi
 if [ "${IMAGE#rhel-7}" != "$IMAGE" ]; then
     # needed for composer testing
@@ -184,11 +222,13 @@ if [ "${IMAGE#rhel-8*}" != "$IMAGE" ]; then
     COCKPIT_DEPS="${COCKPIT_DEPS/atomic /}"
     COCKPIT_DEPS="${COCKPIT_DEPS/docker /}"
     COCKPIT_DEPS="${COCKPIT_DEPS} podman"
-    COCKPIT_DEPS="${COCKPIT_DEPS} libvirt-daemon-kvm libvirt-dbus"
+    COCKPIT_DEPS="${COCKPIT_DEPS} libvirt-dbus"
     TEST_PACKAGES="${TEST_PACKAGES} libvirt-daemon-config-network"
     # Install node for external Composer tests, they use our rhel-* images
     TEST_PACKAGES="${TEST_PACKAGES} nodejs"
     TEST_PACKAGES="${TEST_PACKAGES} subscription-manager-cockpit"
+    # Install insights-client for external subscription-manager tests
+    TEST_PACKAGES="${TEST_PACKAGES} insights-client"
 fi
 
 # in RHEL/CentOS 7, boom is shipped in a different package
@@ -213,8 +253,8 @@ debuginfo-install -y udisks2
 
 # Prepare for building
 
-# only install mock and build if TEST_SOURCE is set
-if [ -n "$TEST_SOURCE" ]; then
+# only install mock and build if DO_BUILD is 1
+if [ "$DO_BUILD" -eq 1 ]; then
     if [ "${IMAGE#rhel-8*}" != "$IMAGE" ]; then
         # no EPEL for rhel-8-0 yet, so install mock from Fedora 28
         dnf install -y rpm-build
@@ -268,14 +308,13 @@ EOF
     fi
 
     useradd -c Builder -G mock builder
-    srpm=$(/var/lib/testvm/make-srpm $TEST_SOURCE)
-    su builder -c "/usr/bin/mock --verbose --installdeps $srpm"
+    opsys=$(cut -d '-' -f 1 <<< "$IMAGE")
+    version=$(cut -d '-' -f 2 <<< "$IMAGE")
+    su builder -c "/usr/bin/mock --verbose -i $(/var/lib/testvm/build-deps.sh "$opsys $version")"
     su builder -c "/usr/bin/mock --install --verbose rpmlint"
 fi
 
 yum clean all || true
-
-[ -z "$SUBSCRIBED" ] || subscription-manager unregister
 
 # For the D-Bus test server
 if type "firewall-cmd" >/dev/null 2>&1; then

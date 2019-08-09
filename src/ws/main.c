@@ -44,6 +44,8 @@
 static gint      opt_port         = 9090;
 static gchar     *opt_address     = NULL;
 static gboolean  opt_no_tls       = FALSE;
+static gboolean  opt_for_tls_proxy    = FALSE;
+static gboolean  opt_proxy_tls_redirect = FALSE;
 static gboolean  opt_local_ssh    = FALSE;
 static gchar     *opt_local_session = NULL;
 static gboolean  opt_version      = FALSE;
@@ -52,6 +54,12 @@ static GOptionEntry cmd_entries[] = {
   {"port", 'p', 0, G_OPTION_ARG_INT, &opt_port, "Local port to bind to (9090 if unset)", NULL},
   {"address", 'a', 0, G_OPTION_ARG_STRING, &opt_address, "Address to bind to (binds on all addresses if unset)", "ADDRESS"},
   {"no-tls", 0, 0, G_OPTION_ARG_NONE, &opt_no_tls, "Don't use TLS", NULL},
+  {"for-tls-proxy", 0, 0, G_OPTION_ARG_NONE, &opt_for_tls_proxy,
+      "Act behind a https-terminating proxy: accept only https:// origins by default",
+      NULL},
+  {"proxy-tls-redirect", 0, 0, G_OPTION_ARG_NONE, &opt_proxy_tls_redirect,
+      "Redirect http requests to https even with --no-tls (useful for running behind a http reverse proxy)",
+      NULL},
   {"local-ssh", 0, 0, G_OPTION_ARG_NONE, &opt_local_ssh, "Log in locally via SSH", NULL },
   {"local-session", 0, 0, G_OPTION_ARG_STRING, &opt_local_session,
       "Launch a bridge in the local session (path to cockpit-bridge or '-' for stdin/out); implies --no-tls",
@@ -114,18 +122,17 @@ main (int argc,
       char *argv[])
 {
   gint ret = 1;
-  CockpitWebServer *server = NULL;
-  GOptionContext *context;
+  g_autoptr(GOptionContext) context = NULL;
+  g_autoptr(GTlsCertificate) certificate = NULL;
+  g_autoptr(GError) error = NULL;
+  g_auto(GStrv) roots = NULL;
+  g_autofree gchar *cert_path = NULL;
+  g_autoptr(GMainLoop) loop = NULL;
+  g_autofree gchar *login_html = NULL;
+  g_autofree gchar *login_po_html = NULL;
+  g_autoptr(CockpitWebServer) server = NULL;
+  CockpitWebServerFlags server_flags = COCKPIT_WEB_SERVER_NONE;
   CockpitHandlerData data;
-  GTlsCertificate *certificate = NULL;
-  GError *local_error = NULL;
-  GError **error = &local_error;
-  gchar **roots = NULL;
-  gchar *cert_path = NULL;
-  GMainLoop *loop = NULL;
-  gchar *login_html = NULL;
-  gchar *login_po_html = NULL;
-  CockpitPipe *pipe = NULL;
   int outfd = -1;
 
   signal (SIGPIPE, SIG_IGN);
@@ -142,9 +149,18 @@ main (int argc,
 
   context = g_option_context_new (NULL);
   g_option_context_add_main_entries (context, cmd_entries, NULL);
+  if (!g_option_context_parse (context, &argc, &argv, &error))
+    goto out;
 
-  if (!g_option_context_parse (context, &argc, &argv, error))
+  /* check mutually exclusive options */
+  if (opt_for_tls_proxy && opt_no_tls)
     {
+      g_printerr ("--for-tls-proxy and --no-tls are mutually exclusive");
+      goto out;
+    }
+  if (opt_for_tls_proxy && opt_proxy_tls_redirect)
+    {
+      g_printerr ("--for-tls-proxy (running behind a https proxy) and --proxy-tls-redirect (running behind a http proxy) are mutually exclusive");
       goto out;
     }
 
@@ -154,6 +170,9 @@ main (int argc,
       ret = 0;
       goto out;
     }
+
+  if (opt_for_tls_proxy)
+    opt_no_tls = TRUE;
 
   /*
    * This process talks on stdin/stdout. However lots of stuff wants to write
@@ -175,9 +194,9 @@ main (int argc,
     }
   else
     {
-      cert_path = cockpit_certificate_locate (FALSE, error);
+      cert_path = cockpit_certificate_locate_gerror (&error);
       if (cert_path != NULL)
-        certificate = cockpit_certificate_load (cert_path, error);
+        certificate = cockpit_certificate_load (cert_path, &error);
       if (certificate == NULL)
         goto out;
       g_info ("Using certificate: %s", cert_path);
@@ -186,7 +205,7 @@ main (int argc,
   loop = g_main_loop_new (NULL, FALSE);
 
   data.os_release = cockpit_system_load_os_release ();
-  data.auth = cockpit_auth_new (opt_local_ssh);
+  data.auth = cockpit_auth_new (opt_local_ssh, opt_for_tls_proxy ? COCKPIT_AUTH_FOR_TLS_PROXY : COCKPIT_AUTH_NONE);
   roots = setup_static_roots (data.os_release);
 
   data.branding_roots = (const gchar **)roots;
@@ -195,18 +214,27 @@ main (int argc,
   login_po_html = g_strdup (DATADIR "/cockpit/static/login.po.html");
   data.login_po_html = (const gchar *)login_po_html;
 
+  if (opt_for_tls_proxy)
+    server_flags |= COCKPIT_WEB_SERVER_FOR_TLS_PROXY;
+  if (!cockpit_conf_bool ("WebService", "AllowUnencrypted", FALSE))
+    {
+      if (!opt_no_tls)
+        server_flags |= COCKPIT_WEB_SERVER_REDIRECT_TLS;
+      if (opt_proxy_tls_redirect)
+        server_flags |= COCKPIT_WEB_SERVER_REDIRECT_TLS | COCKPIT_WEB_SERVER_REDIRECT_TLS_PROXY;
+    }
+
   server = cockpit_web_server_new (opt_address,
                                    opt_port,
                                    certificate,
+                                   server_flags,
                                    NULL,
-                                   error);
+                                   &error);
   if (server == NULL)
     {
-      g_prefix_error (error, "Error starting web server: ");
+      g_prefix_error (&error, "Error starting web server: ");
       goto out;
     }
-
-  cockpit_web_server_set_redirect_tls (server, !cockpit_conf_bool ("WebService", "AllowUnencrypted", FALSE));
 
   if (cockpit_conf_string ("WebService", "UrlRoot"))
     {
@@ -242,6 +270,7 @@ main (int argc,
 
   if (opt_local_session)
     {
+      g_autoptr(CockpitPipe) pipe = NULL;
       struct passwd *pwd;
 
       if (g_str_equal (opt_local_session, "-"))
@@ -263,7 +292,6 @@ main (int argc,
           goto out;
         }
       cockpit_auth_local_async (data.auth, pwd->pw_name, pipe, on_local_ready, g_object_ref (server));
-      g_object_unref (pipe);
     }
   else
     {
@@ -284,22 +312,11 @@ main (int argc,
 out:
   if (outfd >= 0)
     close (outfd);
-  if (loop)
-    g_main_loop_unref (loop);
-  if (local_error)
-    {
-      g_printerr ("cockpit-ws: %s\n", local_error->message);
-      g_error_free (local_error);
-    }
-  g_clear_object (&server);
+  if (error)
+    g_printerr ("cockpit-ws: %s\n", error->message);
   g_clear_object (&data.auth);
   if (data.os_release)
     g_hash_table_unref (data.os_release);
-  g_clear_object (&certificate);
-  g_free (cert_path);
-  g_strfreev (roots);
-  g_free (login_po_html);
-  g_free (login_html);
   g_free (opt_address);
   g_free (opt_local_session);
   cockpit_conf_cleanup ();

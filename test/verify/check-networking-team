@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,11 +21,13 @@ import parent
 from netlib import *
 from testlib import *
 
+from machine_core.constants import TEST_OS_DEFAULT
+
 
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": {},
-        "machine2": {"image": "fedora-29", "address": "10.111.113.2/20", "dhcp": True}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True}
     }
 
     def testTeam(self):
@@ -35,12 +36,7 @@ class TestNetworking(NetworkCase):
 
         self.login_and_go("/network")
 
-        can_add_teams = m.image not in ["continuous-atomic", "rhel-atomic"]
-
         b.wait_attr("#networking-add-team", "data-test-stable", "yes")
-        if not can_add_teams:
-            b.wait_not_visible("#networking-add-team")
-            return
 
         iface1 = self.add_iface()
         iface2 = self.add_iface()
@@ -70,8 +66,8 @@ class TestNetworking(NetworkCase):
         # Deactivate the team and make sure it is still there after a
         # reload.
         b.wait_text_not("#network-interface-mac", "")
-        b.wait_present(".panel-heading:contains('tteam') .btn.active:contains('On')")
-        b.click(".panel-heading:contains('tteam') .btn:contains('Off')")
+        self.wait_onoff(".panel-heading:contains('tteam')", True)
+        self.toggle_onoff(".panel-heading:contains('tteam')")
         b.wait_in_text("tr:contains('Status')", "Inactive")
         b.reload()
         b.enter_page("/network")
@@ -85,11 +81,16 @@ class TestNetworking(NetworkCase):
         b.wait_visible("#networking")
         b.wait_not_present("#networking-interfaces tr[data-interface='tteam']")
 
+        # Check that the former members are displayed and both On
+        # Fixed in PR #12400
+        if m.image not in ["rhel-8-0-distropkg"]:
+            self.wait_for_iface(iface1)
+            self.wait_for_iface(iface2)
+
         # Due to above reload
         self.allow_journal_messages(".*Connection reset by peer.*",
                                     "connection unexpectedly closed by peer")
 
-    @skipImage("No teams", "continuous-atomic", "rhel-atomic")
     def testTeamActive(self):
         b = self.browser
 

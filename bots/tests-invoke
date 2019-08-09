@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 # This file is part of Cockpit.
 #
@@ -19,7 +18,6 @@
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
-import errno
 import os
 import socket
 import subprocess
@@ -38,8 +36,6 @@ DEVNULL = open("/dev/null", "r+")
 
 def main():
     parser = argparse.ArgumentParser(description='Run integration tests')
-    parser.add_argument('-j', '--jobs', dest="jobs", type=int,
-            default=os.environ.get("TEST_JOBS", 1), help="Number of concurrent jobs")
     parser.add_argument('--rebase', help="Rebase onto the specific branch before testing")
     parser.add_argument('--remote', help="The Git remote to use (instead of 'origin')",
                         default="origin")
@@ -49,6 +45,7 @@ def main():
             action='store', help='Publish results centrally to a sink')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--pull-number', help="The number of the pull request to test")
+    parser.add_argument('--html-logs', action='store_true', help="Use log.html to prettify the raw logs")
     parser.add_argument('context', help="The context or type of integration tests to run")
     parser.add_argument('ref', nargs='?', help="The Git remote ref to pull")
     opts = parser.parse_args()
@@ -60,7 +57,7 @@ def main():
 
     try:
         task = PullTask(name, revision, opts.ref, opts.context, opts.rebase, opts.remote,
-                        test_project=test_project, github_revision=github_revision)
+                        test_project=test_project, github_revision=github_revision, html_logs=opts.html_logs)
         ret = task.run(opts)
     except RuntimeError as ex:
         ret = str(ex)
@@ -71,7 +68,7 @@ def main():
     return 0
 
 class PullTask(object):
-    def __init__(self, name, revision, ref, context, base, remote, test_project, github_revision):
+    def __init__(self, name, revision, ref, context, base, remote, test_project, github_revision, html_logs):
         self.name = name
         self.revision = revision
         self.ref = ref
@@ -80,6 +77,7 @@ class PullTask(object):
         self.remote = remote
         self.test_project = test_project
         self.github_revision = github_revision
+        self.html_logs = html_logs
 
         self.sink = None
         self.github_status_data = None
@@ -112,9 +110,7 @@ class PullTask(object):
         api = github.GitHub()
 
         # build a unique file name for this test run
-        id_context = self.context
-        if self.test_project:  # disambiguate when running several external projects
-            id_context = self.test_project + "-" + id_context
+        id_context = "-".join([self.test_project, self.context])
         identifier = "-".join([
             self.name.replace("/", "-"),
             self.github_revision[0:8],
@@ -125,7 +121,7 @@ class PullTask(object):
 
         # build a globally unique test context for GitHub statuses
         github_context = self.context
-        if self.test_project:  # disambiguate tests for external projects
+        if self.test_project != api.repo :  # disambiguate test name for foreign project tests
             github_context += "@" + self.test_project
 
         self.github_status_data = {
@@ -178,13 +174,20 @@ class PullTask(object):
             }
         }
 
-        if self.context.startswith("cockpit/"):
+        if self.html_logs:
+            # explicit request for html logs
+            status["link"] = "log.html"
+            status["extras"] = [ "https://raw.githubusercontent.com/cockpit-project/cockpit/master/bots/task/log.html" ]
+        elif self.test_project != "cockpit-project/cockpit":
             # third-party project, link directly to text log
             status["link"] = "log"
         else:
-            # testing cockpit itself, use HTML log
+            # Testing cockpit itself, use HTML log from current
+            # revision.  Use log.html from code under test, but only
+            # if we are on master.  Other branches don't have a bots/
+            # in their repo.
             status["link"] = "log.html"
-            status["extras"] = [ "https://raw.githubusercontent.com/cockpit-project/cockpit/{0}/bots/task/log.html".format(self.github_revision) ]
+            status["extras"] = [ "https://raw.githubusercontent.com/cockpit-project/cockpit/{0}/bots/task/log.html".format(self.github_revision if not self.base else "master") ]
 
 
         # Include information about which base we're testing against
@@ -194,7 +197,6 @@ class PullTask(object):
                                              universal_newlines=True).strip()
             status["base"] = commit
 
-        (prefix, unused, image) = self.context.partition("/")
         if not self.base:
             status['irc'] = { }    # Only send to IRC when master
 
@@ -219,47 +221,6 @@ class PullTask(object):
 
         return None
 
-    def prepare(self, prefix, value, image, verbose=False):
-        sys.stderr.write("Preparing image: building and installing Cockpit ...\n")
-
-        try:
-            # Download all the additional images so that even older branches find them
-            subprocess.check_call([ os.path.join(BOTS, "image-download"),
-                "candlepin", "fedora-stock", "fedora-23-stock",
-                "ipa", "openshift", "selenium"
-            ])
-
-        except subprocess.CalledProcessError:
-            return "Downloading of additional images failed"
-
-        # COMPAT: Create a legacy tmp/run directory to prevent races during testing
-        try:
-            os.makedirs(os.path.join(BASE, "test", "tmp", "run"))
-        except OSError as ex:
-            if ex.errno != errno.EEXIST:
-                raise
-
-        # Now actually run the prepare tooling
-        cmd = [ os.path.join(BOTS, "image-prepare") ]
-        if prefix == "image" or prefix == "container":
-            cmd += [ "--containers" ]
-        cmd += [ "--verbose" ]
-
-        # Flush our own output before invoking the command
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        try:
-            # Do the basic prepare
-            subprocess.check_call(cmd + [ image ])
-
-            # For containers tests we install to openshift too
-            if value == "kubernetes":
-                subprocess.check_call(cmd + [ "--install-only", "openshift" ])
-
-        except subprocess.CalledProcessError:
-            return "Preparation of testable image failed"
-
     def stop_publishing(self, ret):
         sink = self.sink
         def mark_failed():
@@ -278,7 +239,7 @@ class PullTask(object):
             message = "Tests passed"
             mark_passed()
         else:
-            message = "{0} tests failed".format(ret)
+            message = "Tests failed with code {0}".format(ret)
             mark_failed()
             ret = 0 # A failure, but not for this script
         sink.status["message"] = message
@@ -326,19 +287,10 @@ class PullTask(object):
         os.environ["TEST_NAME"] = self.name
         os.environ["TEST_REVISION"] = self.revision
 
-        # Split a value like verify/fedora-atomic
-        (prefix, unused, value) = self.context.partition("/")
-
-        if prefix in [ 'container' ]:
-            image = 'fedora-29'
-        elif prefix in [ 'selenium', 'avocado' ]:
-            image = 'fedora-30'
-        elif prefix == 'cockpit':
-            (image, _, scenario) = value.partition('/')
-            if scenario:
-                os.environ["TEST_SCENARIO"] = scenario
-        else:
-            image = value
+        # Split OS and potential scenario
+        (image, _, scenario) = self.context.partition("/")
+        if scenario:
+            os.environ["TEST_SCENARIO"] = scenario
         os.environ["TEST_OS"] = image
 
         msg = "Testing {0} for {1} with {2} on {3}...\n".format(self.github_revision, self.name,
@@ -350,39 +302,17 @@ class PullTask(object):
         if self.base:
             ret = self.rebase()
 
-        test = os.path.join(BOTS, "..", "test")
-
-        # Figure out what to do next
-        if prefix == "verify":
-            cmd = [ "timeout", "120m", os.path.join(test, "verify", "run-tests"),
-                    "--jobs", str(opts.jobs) ]
-        elif prefix == "avocado":
-            cmd = [ "timeout", "60m", os.path.join(test, "avocado", "run-tests"),
-                    "--quick", "--tests" ]
-        elif prefix == "selenium":
-            if value not in ['firefox', 'chrome', 'edge']:
-                ret = "Unknown browser for selenium test"
-            cmd = [ "timeout", "60m", os.path.join(test, "avocado", "run-tests"),
-                    "--quick", "--selenium-tests", "--browser", value]
-        elif prefix == "image" or prefix == "container":
-            cmd = [ "timeout", "90m", os.path.join(test, "containers", "run-tests"),
-                    "--container", value]
-        elif prefix == "cockpit":
-            cmd = [ "timeout", "90m", os.path.join(test, "run") ]
-        else:
-            ret = "Unknown context"
-
-
-        # Prepare the image to run
-        if not ret and prefix != "cockpit":
-            ret = self.prepare(prefix, value, image, opts.verbose)
-
         # Flush our own output before running command
         sys.stdout.flush()
         sys.stderr.flush()
 
         # Actually run the tests
         if not ret:
+            entry_point = os.path.join(BOTS, "..", ".cockpit-ci", "run")
+            alt_entry_point = os.path.join(BOTS, "..", "test", "run")
+            if not os.path.exists(entry_point) and os.path.exists(alt_entry_point):
+                entry_point = alt_entry_point
+            cmd = [ "timeout", "120m", entry_point ]
             if opts.verbose:
                 cmd.append("--verbose")
             ret = subprocess.call(cmd)

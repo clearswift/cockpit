@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,11 +21,13 @@ import parent
 from netlib import *
 from testlib import *
 
+from machine_core.constants import TEST_OS_DEFAULT
+
 
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": {},
-        "machine2": {"image": "fedora-29", "address": "10.111.113.2/20", "dhcp": True}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True}
     }
 
     def testBasic(self):
@@ -60,8 +61,8 @@ class TestNetworking(NetworkCase):
 
         # Disconnect
         #
-        b.wait_present(".panel-heading:contains('%s') .btn.active:contains('On')" % iface)
-        b.click(".panel-heading:contains('%s') .btn:contains('Off')" % iface)
+        self.wait_onoff(".panel-heading:contains('%s')" % iface, True)
+        self.toggle_onoff(".panel-heading:contains('%s')" % iface)
         b.wait_in_text("tr:contains('Status')", "Inactive")
 
         # Switch it back to "auto" from the command line and bring it
@@ -77,10 +78,10 @@ class TestNetworking(NetworkCase):
         #
         b.click("tr:contains('IPv4') a")
         b.wait_popup("network-ip-settings-dialog")
-        b.wait_text("#network-ip-settings-dialog [data-field='dns'] .btn.active", "On")
-        b.click("#network-ip-settings-dialog [data-field='dns'] .btn:contains('Off')")
+        self.wait_onoff("#network-ip-settings-dialog [data-field='dns']", True)
+        self.toggle_onoff("#network-ip-settings-dialog [data-field='dns']")
         # The "DNS Search Domains" setting should follow suit
-        b.wait_text("#network-ip-settings-dialog [data-field='dns_search'] .btn.active", "Off")
+        self.wait_onoff("#network-ip-settings-dialog [data-field='dns_search']", False)
         b.click("#network-ip-settings-dialog button:contains('Apply')")
         b.wait_popdown("network-ip-settings-dialog")
 
@@ -136,10 +137,17 @@ systemctl daemon-reload""")
         assert_stopped(True)
         b.click("#networking-nm-crashed a")
         b.enter_page("/system/services")
-        b.wait_in_text("#service-unit", "NetworkManager.service")
-        b.click("button[data-action='StartUnit']")
-        b.wait_in_text("#service-unit", "active")
-        b.wait_present("button[data-action='StopUnit']")
+        if m.image in ["rhel-8-0-distropkg"]: # Changed in #12265
+            b.wait_in_text("#service-unit", "NetworkManager.service")
+            b.click("button[data-action='StartUnit']")
+            b.wait_in_text("#service-unit", "active")
+            b.wait_present("button[data-action='StopUnit']")
+        else:
+            b.wait_text(".service-name", "Network Manager")
+            b.click(".service-top-panel .dropdown-kebab-pf button")
+            b.click(".service-top-panel .dropdown-menu a:contains('Start')")
+            b.wait_in_text("#statuses", "Running")
+
         # networking page should notice start from Services page
         b.go("/network")
         b.enter_page("/network")

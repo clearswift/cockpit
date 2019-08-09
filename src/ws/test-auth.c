@@ -43,7 +43,7 @@ static void
 setup (Test *test,
        gconstpointer data)
 {
-  test->auth = cockpit_auth_new (FALSE);
+  test->auth = cockpit_auth_new (FALSE, COCKPIT_AUTH_NONE);
 }
 
 static void
@@ -58,7 +58,7 @@ setup_normal (Test *test,
               gconstpointer data)
 {
   cockpit_config_file = SRCDIR "/src/ws/mock-config/cockpit/cockpit.conf";
-  test->auth = cockpit_auth_new (FALSE);
+  test->auth = cockpit_auth_new (FALSE, COCKPIT_AUTH_NONE);
 }
 
 static void
@@ -66,7 +66,7 @@ setup_alt_config (Test *test,
               gconstpointer data)
 {
   cockpit_config_file = SRCDIR "/src/ws/mock-config/cockpit/cockpit-alt.conf";
-  test->auth = cockpit_auth_new (FALSE);
+  test->auth = cockpit_auth_new (FALSE, COCKPIT_AUTH_NONE);
 }
 
 static void
@@ -349,7 +349,6 @@ test_idle_timeout (Test *test,
   g_assert (cockpit_web_service_get_idling (service));
   g_object_unref (service);
 
-  g_assert (cockpit_ws_process_idle == 2);
   g_signal_connect (test->auth, "idling", G_CALLBACK (on_idling_set_flag), &idling);
 
   /* Now wait for 2 seconds, and the service should be gone */
@@ -376,8 +375,6 @@ test_process_timeout (Test *test,
                       gconstpointer data)
 {
   gboolean idling = FALSE;
-
-  g_assert (cockpit_ws_process_idle == 2);
 
   g_signal_connect (test->auth, "idling", G_CALLBACK (on_idling_set_flag), &idling);
 
@@ -1076,7 +1073,7 @@ setup_startups (Test *test,
   if (fix->warn)
     cockpit_expect_warning ("Illegal MaxStartups spec*");
 
-  test->auth = cockpit_auth_new (FALSE);
+  test->auth = cockpit_auth_new (FALSE, COCKPIT_AUTH_NONE);
 }
 
 static void
@@ -1173,9 +1170,13 @@ int
 main (int argc,
       char *argv[])
 {
+  gboolean res;
+
   cockpit_ws_session_program = BUILDDIR "/mock-auth-command";
   cockpit_ws_service_idle = 1;
-  cockpit_ws_process_idle = 2;
+
+  res = g_setenv ("COCKPIT_WS_PROCESS_IDLE", "2", TRUE);
+  g_assert (res);
 
   cockpit_test_init (&argc, &argv);
 

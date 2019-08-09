@@ -29,8 +29,13 @@ G_BEGIN_DECLS
 #define COCKPIT_RESOURCE_PACKAGE_VALID "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
 
 #define COCKPIT_TYPE_WEB_RESPONSE         (cockpit_web_response_get_type ())
-#define COCKPIT_WEB_RESPONSE(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), COCKPIT_TYPE_WEB_RESPONSE, CockpitWebResponse))
-#define COCKPIT_IS_WEB_RESPONSE(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), COCKPIT_TYPE_WEB_RESPONSE))
+G_DECLARE_FINAL_TYPE(CockpitWebResponse, cockpit_web_response, COCKPIT, WEB_RESPONSE, GObject)
+
+typedef enum {
+  COCKPIT_WEB_RESPONSE_NONE = 0,
+  COCKPIT_WEB_RESPONSE_FOR_TLS_PROXY = 1 << 0,
+  COCKPIT_WEB_RESPONSE_MAX = 1 << 1
+} CockpitWebResponseFlags;
 
 typedef enum {
   COCKPIT_WEB_RESPONSE_READY = 1,
@@ -54,13 +59,12 @@ extern const gchar *  cockpit_web_exception_escape_root;
 
 extern const gchar *  cockpit_web_failure_resource;
 
-GType                 cockpit_web_response_get_type      (void) G_GNUC_CONST;
-
 CockpitWebResponse *  cockpit_web_response_new           (GIOStream *io,
                                                           const gchar *original_path,
                                                           const gchar *path,
                                                           const gchar *query,
-                                                          GHashTable *in_headers);
+                                                          GHashTable *in_headers,
+                                                          CockpitWebResponseFlags flags);
 void                  cockpit_web_response_set_method    (CockpitWebResponse *response,
                                                           const gchar *method);
 
@@ -158,7 +162,8 @@ gchar *      cockpit_web_response_security_policy        (const gchar *content_s
 
 
 const gchar *  cockpit_connection_get_protocol           (GIOStream *connection,
-                                                          GHashTable *headers);
+                                                          GHashTable *headers,
+                                                          gboolean for_tls_proxy);
 
 G_END_DECLS
 

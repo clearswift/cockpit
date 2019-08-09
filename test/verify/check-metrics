@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -179,8 +178,7 @@ class TestMetrics(MachineCase):
 
         m.execute("kill %d" % net_pid)
 
-    @skipImage("No PCP available on Atomic", "fedora-atomic", "rhel-atomic", "continuous-atomic")
-    @skipImage("No PCP available on Debian 9/testing/unstable", "debian-stable")
+    @skipImage("No PCP available", "fedora-atomic")
     def testPcp(self):
         m = self.machine
 

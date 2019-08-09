@@ -30,6 +30,9 @@
 
 #include <string.h>
 
+/* Declared in cockpitwebserver.c */
+extern gboolean cockpit_webserver_want_certificate;
+
 /* JSON dict snippet for headers that are present in every request */
 #define STATIC_HEADERS "\"X-DNS-Prefetch-Control\":\"off\",\"Referrer-Policy\":\"no-referrer\",\"X-Content-Type-Options\":\"nosniff\""
 
@@ -71,7 +74,7 @@ static void
 setup_general (TestGeneral *tt,
                gconstpointer host_fixture)
 {
-  tt->web_server = cockpit_web_server_new (NULL, 0, NULL, NULL, NULL);
+  tt->web_server = cockpit_web_server_new (NULL, 0, NULL, COCKPIT_WEB_SERVER_NONE, NULL, NULL);
   cockpit_web_server_start (tt->web_server);
   tt->port = cockpit_web_server_get_port (tt->web_server);
   tt->transport = mock_transport_new ();
@@ -125,7 +128,7 @@ test_host_header (TestGeneral *tt,
 
   if (tt->host == NULL)
     {
-      cockpit_test_skip ("Couldn't determine non local ip");
+      g_test_skip ("Couldn't determine non local ip");
       return;
     }
 
@@ -351,7 +354,7 @@ test_http_chunked (void)
   guint count;
   guint port;
 
-  web_server = cockpit_web_server_new (NULL, 0, NULL, NULL, NULL);
+  web_server = cockpit_web_server_new (NULL, 0, NULL, COCKPIT_WEB_SERVER_NONE, NULL, NULL);
   g_assert (web_server);
   port = cockpit_web_server_get_port (web_server);
   g_signal_connect (web_server, "handle-resource::/",
@@ -486,7 +489,7 @@ setup_tls (TestTls *test,
                                                         SRCDIR "/src/bridge/mock-server.key", &error);
   g_assert_no_error (error);
 
-  test->web_server = cockpit_web_server_new (NULL, 0, test->certificate, NULL, &error);
+  test->web_server = cockpit_web_server_new (NULL, 0, test->certificate, COCKPIT_WEB_SERVER_NONE, NULL, &error);
   g_assert_no_error (error);
 
   test->port = cockpit_web_server_get_port (test->web_server);
@@ -506,6 +509,7 @@ teardown_tls (TestTls *test,
   g_object_unref (test->web_server);
   g_object_unref (test->transport);
   g_clear_object (&test->peer);
+  cockpit_webserver_want_certificate = FALSE;
 }
 
 static void
@@ -677,6 +681,9 @@ test_tls_certificate (TestTls *test,
   const gchar *control;
   GBytes *bytes;
   GBytes *data;
+
+  /* tell server to request client cert */
+  cockpit_webserver_want_certificate = TRUE;
 
   tls = cockpit_json_parse_object (json, -1, &error);
   g_assert_no_error (error);
@@ -851,17 +858,12 @@ test_tls_authority_bad (TestTls *test,
   g_free (expected_json);
 }
 
-/* Declared in cockpitwebserver.c */
-extern gboolean cockpit_webserver_want_certificate;
-
 int
 main (int argc,
       char *argv[])
 {
   char *ip = non_local_ip ();
   int result;
-
-  cockpit_webserver_want_certificate = TRUE;
 
   cockpit_test_init (&argc, &argv);
 

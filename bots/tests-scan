@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 # This file is part of Cockpit.
 #
@@ -18,79 +17,18 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with Cockpit; If not, see <http://www.gnu.org/licenses/>.
 
-BASELINE_PRIORITY = 5
-MAX_PRIORITY = 9
-
-REPO_BRANCH_CONTEXT = {
-    'cockpit-project/cockpit': {
-        'master': ['avocado/fedora', 'container/kubernetes', 'container/bastion',
-            'selenium/firefox', 'selenium/chrome', 'verify/centos-7', 'verify/debian-stable',
-            'verify/debian-testing', 'verify/fedora-29', 'verify/fedora-30', 'verify/fedora-atomic',
-            'verify/ubuntu-1804', 'verify/ubuntu-stable', 'verify/rhel-7-6-distropkg',
-            'verify/rhel-7-7', 'verify/rhel-8-0-distropkg', 'verify/rhel-atomic', 'selenium/edge',
-            'verify/rhel-8-1',
-        ],
-        'rhel-7.6': ['avocado/fedora', 'container/kubernetes', 'container/bastion',
-            'selenium/firefox', 'selenium/chrome', 'verify/rhel-7-6',
-        ],
-        'rhel-7.7': ['avocado/fedora', 'container/kubernetes', 'container/bastion',
-            'selenium/firefox', 'selenium/chrome', 'verify/rhel-7-7',
-        ],
-        'rhel-8.0': ['avocado/fedora', 'container/bastion', 'selenium/firefox', 'selenium/chrome',
-            'verify/rhel-8-0',
-        ],
-        'rhel-8-appstream': ['avocado/fedora', 'container/bastion', 'selenium/firefox',
-            'selenium/chrome', 'verify/rhel-8-0-distropkg', 'verify/rhel-8-1',
-        ],
-        'rhel-8.1': ['verify/rhel-8-1',
-        ],
-        # These can be triggered manually with bots/tests-trigger
-        '_manual': ['verify/continuous-atomic', 'verify/fedora-i386', 'verify/fedora-testing',
-        ],
-    },
-    'cockpit-project/starter-kit': {
-        'master': [
-            'cockpit/centos-7',
-            'cockpit/fedora-29',
-        ],
-    },
-    'cockpit-project/cockpit-ostree': {
-        'master': [
-            'cockpit/fedora-atomic',
-            'cockpit/continuous-atomic',
-            'cockpit/rhel-atomic',
-        ],
-    },
-    'cockpit-project/cockpit-podman': {
-        'master': [
-            'cockpit/fedora-29',
-            'cockpit/fedora-30',
-        ],
-    },
-    'weldr/welder-web': {
-        'master': [
-            'cockpit/fedora-29/chrome',
-            'cockpit/fedora-29/firefox',
-            'cockpit/rhel-7-7/firefox',
-            'cockpit/rhel-8-1/chrome',
-            'cockpit/fedora-30/edge',
-        ],
-        'rhel-8.0': ['cockpit/rhel-8-0/chrome', 'cockpit/rhel-8-0/firefox', 'cockpit/rhel-8-0/edge'
-        ],
-        'rhel-8.1': ['cockpit/rhel-8-1/chrome', 'cockpit/rhel-8-1/firefox', 'cockpit/rhel-8-1/edge'
-        ],
-    }
+# Random extra options for tests-invoke
+REPO_EXTRA_INVOKE_OPTIONS = {
+    'mvollmer/subscription-manager': [ "--html-logs" ]
 }
 
 # Label: should a PR trigger external tests
 LABEL_TEST_EXTERNAL = "test-external"
 
 import argparse
-import contextlib
 import os
 import json
 import pipes
-import ssl
 import sys
 import time
 import logging
@@ -100,7 +38,7 @@ import urllib.request
 sys.dont_write_bytecode = True
 logging.basicConfig(level=logging.INFO)
 
-from task import github, label, redhat_network, labels_of_pull
+from task import github, label, redhat_network, labels_of_pull, distributed_queue, testmap
 
 no_amqp = False
 try:
@@ -121,7 +59,7 @@ def main():
     parser.add_argument('-p', '--pull-number', default=None,
                         help='Single pull request to scan for tasks')
     parser.add_argument('--pull-data', default=None,
-                        help='pull_request GitHub JSON data to evaluate; mutualy exclusive with -p and -s')
+                        help='pull_request event GitHub JSON data to evaluate; mutualy exclusive with -p and -s')
     parser.add_argument('-s', '--sha', default=None,
                         help='SHA beloging to pull request to scan for tasks')
     parser.add_argument('--amqp', default=None,
@@ -142,13 +80,13 @@ def main():
     opts.repo = api.repo
 
     try:
-        policy = REPO_BRANCH_CONTEXT[opts.repo]
+        policy = testmap.tests_for_project(opts.repo)
         if opts.context:
             policy = {}
-            for branch in REPO_BRANCH_CONTEXT[opts.repo]:
+            for (branch, contexts) in testmap.tests_for_project(opts.repo).items():
                 branch_context = []
                 for context in opts.context:
-                    if context in REPO_BRANCH_CONTEXT[opts.repo][branch]:
+                    if context in contexts:
                         branch_context.append(context)
                 if branch_context:
                     policy[branch] = branch_context
@@ -168,33 +106,6 @@ def main():
 
     return 0
 
-@contextlib.contextmanager
-def distributed_queue(amqp_server):
-    try:
-        host, port = amqp_server.split(':')
-    except ValueError:
-        logging.error('Please format --amqp as host:port')
-        sys.exit(1)
-    connection = pika.BlockingConnection(pika.ConnectionParameters(
-        host=host,
-        port=int(port),
-        ssl=True,
-        ssl_options=pika.SSLOptions(
-            ssl_version=ssl.PROTOCOL_TLSv1_2,
-            cafile='/run/secrets/webhook/ca.pem',
-            keyfile='/run/secrets/webhook/amqp-client.key',
-            certfile='/run/secrets/webhook/amqp-client.pem',
-            server_hostname=host),
-        credentials=pika.credentials.ExternalCredentials()))
-    channel = connection.channel()
-    arguments = {
-        "x-max-priority": MAX_PRIORITY
-    }
-    channel.queue_declare(queue='public', arguments=arguments, auto_delete=False)
-    channel.queue_declare(queue='rhel', arguments=arguments, auto_delete=False)
-    yield channel
-    connection.close()
-
 # Prepare a human readable output
 def tests_human(priority, name, number, revision, ref, context, base, repo, bots_ref):
     if not priority:
@@ -213,7 +124,10 @@ def tests_human(priority, name, number, revision, ref, context, base, repo, bots
     )
 
 def is_internal_context(context):
-    return "rhel" in context or "edge" in context
+    for pattern in ["rhel", "edge", "vmware", "openstack"]:
+        if pattern in context:
+            return True
+    return False
 
 # Prepare a test invocation command
 def tests_invoke(priority, name, number, revision, ref, context, base, repo, bots_ref, options):
@@ -229,7 +143,7 @@ def tests_invoke(priority, name, number, revision, ref, context, base, repo, bot
     current = time.strftime('%Y%m%d-%H%M%M')
 
     checkout = "PRIORITY={priority:04d} bots/make-checkout --verbose"
-    cmd = "TEST_NAME={name}-{current} TEST_REVISION={revision} bots/tests-invoke --pull-number={pull_number} "
+    cmd = "TEST_PROJECT={repo} TEST_NAME={name}-{current} TEST_REVISION={revision} bots/tests-invoke --pull-number={pull_number} "
     if base:
         cmd += " --rebase={base}"
         checkout += " --base={base}"
@@ -237,9 +151,6 @@ def tests_invoke(priority, name, number, revision, ref, context, base, repo, bot
     checkout += " --repo={repo}"
 
     if bots_ref:
-        # we are checking the external repo on a cockpit PR, so keep GITHUB_BASE for cockpit and just set
-        # TEST_PROJECT for correct statuses
-        cmd = "TEST_PROJECT={repo} " + cmd
         checkout += " --bots-ref={bots_ref}"
     else:
         # we are checking the external repo on a PR of that external repo
@@ -247,6 +158,9 @@ def tests_invoke(priority, name, number, revision, ref, context, base, repo, bot
 
     if repo != "cockpit-project/cockpit":
         cmd = cmd + " --remote=test"
+
+    if repo in REPO_EXTRA_INVOKE_OPTIONS:
+        cmd += " " + " ".join(REPO_EXTRA_INVOKE_OPTIONS[repo])
 
     cmd += " {context} {ref}"
     if bots_ref:
@@ -269,11 +183,11 @@ def tests_invoke(priority, name, number, revision, ref, context, base, repo, bot
         repo=pipes.quote(repo),
     )
 
-def queue_test(priority, name, number, revision, ref, context, base, repo, bots_ref, queue, options):
+def queue_test(priority, name, number, revision, ref, context, base, repo, bots_ref, channel, options):
     command = tests_invoke(priority, name, number, revision, ref, context, base, repo, bots_ref, options)
     if command:
-        if priority > MAX_PRIORITY:
-            priority = MAX_PRIORITY
+        if priority > distributed_queue.MAX_PRIORITY:
+            priority = distributed_queue.MAX_PRIORITY
 
         body = {
             "command": command,
@@ -282,12 +196,8 @@ def queue_test(priority, name, number, revision, ref, context, base, repo, bots_
             "ref": ref,
             "name": name,
         }
-        # repo will be set if it's an external project on a cockpit PR
-        # options.repo will be set if it's an external project's PR
-        if is_internal_context(context):
-            queue.basic_publish('', 'rhel', json.dumps(body), properties=pika.BasicProperties(priority=priority))
-        else:
-            queue.basic_publish('', 'public', json.dumps(body), properties=pika.BasicProperties(priority=priority))
+        queue = 'rhel' if is_internal_context(context) else 'public'
+        channel.basic_publish('', queue, json.dumps(body), properties=pika.BasicProperties(priority=priority))
         logging.info("Published '{0}' on '{1}' with command: '{2}'".format(name, revision, command))
 
 def prioritize(status, title, labels, priority, context, number):
@@ -310,21 +220,20 @@ def prioritize(status, title, labels, priority, context, number):
 
     # Ignore context when the PR has [no-test] in the title or as label, unless
     # the context was directly triggered
-    if (('no-test' in list(labels) or '[no-test]' in title) and
+    if (('no-test' in labels or '[no-test]' in title) and
         status.get("description", "") != github.NOT_TESTED_DIRECT):
         logging.info("Skipping '{0}' on #{1} because it is no-test".format(context, number))
         priority = 0
         update = None
 
     if priority > 0:
-        values = list(labels)
-        if "priority" in values:
+        if "priority" in labels:
             priority += 2
-        if "blocked" in values:
+        if "blocked" in labels:
             priority -= 1
 
         # Pull requests where the title starts with WIP get penalized
-        if title.startswith("WIP") or "needswork" in values:
+        if title.startswith("WIP") or "needswork" in labels:
             priority -= 1
 
         # Is testing already in progress?
@@ -369,7 +278,7 @@ def cockpit_tasks(api, update, branch_contexts, repo, pull_data, pull_number, sh
     contexts = set(itertools.chain(*branch_contexts.values()))
 
     if pull_data:
-        pulls.append(json.loads(pull_data))
+        pulls.append(json.loads(pull_data)['pull_request'])
     elif pull_number:
         pull = api.get("pulls/{0}".format(pull_number))
         if pull:
@@ -400,7 +309,7 @@ def cockpit_tasks(api, update, branch_contexts, repo, pull_data, pull_number, sh
         # Do we have any statuses for this commit?
         have = len(statuses.keys()) > 0
 
-        baseline = BASELINE_PRIORITY
+        baseline = distributed_queue.BASELINE_PRIORITY
         # amqp automatically prioritizes on age
         if not amqp:
             # modify the baseline slightly to favor older pull requests, so that we don't
@@ -434,7 +343,7 @@ def cockpit_tasks(api, update, branch_contexts, repo, pull_data, pull_number, sh
                 return False
             if base != "master":  # bots/ is always taken from master branch
                 return False
-            if LABEL_TEST_EXTERNAL in labels_of_pull(pull):  # already checked before?
+            if LABEL_TEST_EXTERNAL in labels:  # already checked before?
                 return True
 
             if not have:
@@ -450,10 +359,10 @@ def cockpit_tasks(api, update, branch_contexts, repo, pull_data, pull_number, sh
             return False
 
         if trigger_externals():
-            for proj_repo in REPO_BRANCH_CONTEXT:
+            for proj_repo in testmap.projects():
                 if proj_repo == "cockpit-project/cockpit":
                     continue
-                for context in REPO_BRANCH_CONTEXT[proj_repo]["master"]:
+                for context in testmap.tests_for_project(proj_repo).get("master", []):
                     repo_context = context + "@" + proj_repo
 
                     status = statuses.get(repo_context, {})
@@ -483,15 +392,15 @@ def scan_for_pull_tasks(api, policy, opts, repo):
     if not opts.amqp:
         func = lambda x: tests_invoke(*x, options=opts)
         return list(map(func, results))
-    with distributed_queue(opts.amqp) as queue:
-        func = lambda x: queue_test(*x, queue=queue, options=opts)
+    with distributed_queue.DistributedQueue(opts.amqp, ['rhel', 'public']) as q:
+        func = lambda x: queue_test(*x, channel=q.channel, options=opts)
         return list(map(func, results))
 
 def scan_external_projects(opts):
     tests = []
-    for repo in REPO_BRANCH_CONTEXT:
+    for repo in testmap.projects():
         if repo != "cockpit-project/cockpit":
-            tests += scan_for_pull_tasks(github.GitHub(repo=repo), REPO_BRANCH_CONTEXT[repo], opts, repo)
+            tests += scan_for_pull_tasks(github.GitHub(repo=repo), testmap.tests_for_project(repo), opts, repo)
     return tests
 
 if __name__ == '__main__':

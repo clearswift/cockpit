@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -24,7 +23,7 @@ import parent
 from testlib import *
 
 
-@skipImage("Don't run upstream tests against distro packages", "rhel-7-6-distropkg", "rhel-8-0-distropkg")
+@skipImage("Don't run upstream tests against distro packages", "rhel-8-0-distropkg")
 class TestAccounts(MachineCase):
 
     def testBasic(self):
@@ -40,7 +39,6 @@ class TestAccounts(MachineCase):
 
         # Set a real name
         b.go("#/anton")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "anton")
         b.wait_text("#account-title", "anton")
         b.set_val('#account-real-name', "Anton Arbitrary")
@@ -64,7 +62,6 @@ class TestAccounts(MachineCase):
 
         good_password = "tqymuVh.ZfZnP§9Wr=LM3JyG5yx"
         # Delete it
-        b.wait_present('#account-delete:not([disabled])')
         b.click('#account-delete')
         b.wait_popup('account-confirm-delete-dialog')
         b.click('#account-confirm-delete-apply')
@@ -74,7 +71,6 @@ class TestAccounts(MachineCase):
 
         # Check root user
         b.go("#/root")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "root")
         # some operations are not allowed for root user
         b.wait_present("#account-delete.disabled")
@@ -101,7 +97,6 @@ class TestAccounts(MachineCase):
         # wrong password confirmation
         b.set_val('#accounts-create-pw2', good_password + 'b')
         b.click('#accounts-create-create')
-        b.wait_visible("#accounts-create-dialog .dialog-error")
         b.wait_in_text("#accounts-create-dialog .dialog-error.help-block", "The passwords do not match")
 
         # correct password confirmation
@@ -145,17 +140,15 @@ class TestAccounts(MachineCase):
 
         # Unlock it and make it an admin
         b.go("#/jussi")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "jussi")
-        b.wait_present('#account-locked:not([disabled])')
         b.set_checked('#account-locked', False)
         b.wait(lambda: not is_locked())
-        b.wait_present(admin_role_sel + ":not(:checked):not([disabled])")
+        b.wait_present(admin_role_sel + ":not(:checked)")
         b.set_checked(admin_role_sel, True)
         b.wait(is_admin)
         # An alert which shows up once we've changed things
         b.wait_present("#account-roles .alert-info")
-        b.wait_present(admin_role_sel + ":checked:not([disabled])")
+        b.wait_present(admin_role_sel + ":checked")
         b.set_checked(admin_role_sel, False)
         b.wait(lambda: not is_admin())
         m.execute("/usr/sbin/usermod jussi -G %s -a" % m.get_admin_group())
@@ -163,9 +156,7 @@ class TestAccounts(MachineCase):
 
         # Change the password of this account
         b.go("#/jussi")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "jussi")
-        b.wait_present('#account-set-password:not([disabled])')
         b.click('#account-set-password')
         b.wait_popup('account-set-password-dialog')
 
@@ -210,8 +201,7 @@ class TestAccounts(MachineCase):
         new_password = "tqymuVh.Zf5"
         new_password_2 = "cEwghLYX"
 
-        # defaults to empty shell on debian-stable (Debian 9 only), so specify it explicitly
-        m.execute("useradd --shell /bin/bash anton; echo anton:foobar | chpasswd")
+        m.execute("useradd anton; echo anton:foobar | chpasswd")
         self.login_and_go("/users", user="anton", authorized=False)
         b.go("#/anton")
         b.wait_text("#account-user-name", "anton")
@@ -256,8 +246,7 @@ class TestAccounts(MachineCase):
         b = self.browser
         new_password = "tqymuVh.Zf5"
 
-        # defaults to empty shell on debian-stable (Debian 9 only), so specify it explicitly
-        m.execute("useradd --shell /bin/bash anton; echo anton:foobar | chpasswd")
+        m.execute("useradd anton; echo anton:foobar | chpasswd")
         self.login_and_go("/users", user="root", authorized=False)
 
         # test this on root and a normal user account
@@ -305,7 +294,6 @@ class TestAccounts(MachineCase):
 
         self.login_and_go("/users")
         b.go("#/scruffy")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "scruffy")
 
         # Try to expire the account
@@ -377,7 +365,6 @@ class TestAccounts(MachineCase):
         self.allow_authorize_journal_messages()
         self.login_and_go("/users", user="scruffy")
         b.go("#/scruffy")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "scruffy")
         b.wait_text("#account-expiration-button", "Never lock account")
         b.wait_present("#account-expiration-button.disabled")
@@ -388,7 +375,6 @@ class TestAccounts(MachineCase):
         b.logout()
         self.login_and_go("/users")
         b.go("#/scruffy")
-        b.wait_visible("#account")
         b.wait_text("#account-user-name", "scruffy")
         b.click("#password-reset-button")
         b.wait_popup("password-reset")

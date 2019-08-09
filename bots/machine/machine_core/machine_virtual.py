@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This file is part of Cockpit.
 #
 # Copyright (C) 2013 Red Hat, Inc.
@@ -33,6 +31,7 @@ import time
 from .exceptions import Failure, RepeatableFailure
 from .machine import Machine
 from .constants import TEST_DIR, BOTS_DIR
+from .directories import get_temp_dir
 
 MEMORY_MB = 1024
 
@@ -45,7 +44,7 @@ def get_build_image(image):
     if test_os == "fedora-atomic":
         image = "fedora-29"
     elif test_os == "rhel-atomic":
-        image = "rhel-7-6"
+        image = "rhel-7-7"
     elif test_os == "continuous-atomic":
         image = "centos-7"
     return image
@@ -202,8 +201,10 @@ class VirtNetwork:
 
     def _lock(self, start, step=1, force=False):
         resources = os.path.join(tempfile.gettempdir(), ".cockpit-test-resources")
-        if not os.path.exists(resources):
+        try:
             os.mkdir(resources, 0o755)
+        except FileExistsError:
+            pass
         for port in range(start, start + (100 * step), step):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -319,7 +320,7 @@ class VirtMachine(Machine):
         Machine.__init__(self, image=image, **args)
 
         base_dir = os.path.dirname(BOTS_DIR)
-        self.run_dir = os.path.join(os.environ.get("TEST_DATA", base_dir), "tmp", "run")
+        self.run_dir = os.path.join(get_temp_dir(), "run")
 
         self.virt_connection = self._libvirt_connection(hypervisor = "qemu:///session")
 
@@ -352,11 +353,7 @@ class VirtMachine(Machine):
     def _start_qemu(self):
         self._cleanup()
 
-        try:
-            os.makedirs(self.run_dir, 0o750)
-        except OSError as ex:
-            if ex.errno != errno.EEXIST:
-                raise
+        os.makedirs(self.run_dir, 0o750, exist_ok=True)
 
         def execute(*args):
             self.message(*args)
@@ -612,11 +609,7 @@ class VirtMachine(Machine):
     def add_disk(self, size=None, serial=None, path=None, type='raw'):
         index = len(self._disks)
 
-        try:
-            os.makedirs(self.run_dir, 0o750)
-        except OSError as ex:
-            if ex.errno != errno.EEXIST:
-                raise
+        os.makedirs(self.run_dir, 0o750, exist_ok=True)
 
         if path:
             (unused, image) = tempfile.mkstemp(suffix='.qcow2', prefix=os.path.basename(path), dir=self.run_dir)

@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,11 +21,13 @@ import parent
 from netlib import *
 from testlib import *
 
+from machine_core.constants import TEST_OS_DEFAULT
+
 
 class TestNetworking(NetworkCase):
     provision = {
         "machine1": {},
-        "machine2": {"image": "fedora-29", "address": "10.111.113.2/20", "dhcp": True}
+        "machine2": {"image": TEST_OS_DEFAULT, "address": "10.111.113.2/20", "dhcp": True}
     }
 
     def testBridge(self):
@@ -59,10 +60,15 @@ class TestNetworking(NetworkCase):
 
         # Delete the bridge
         b.click("#networking-interfaces tr[data-interface='tbridge'] td:first-child")
-        b.wait_visible("#network-interface")
         b.click("#network-interface button:contains('Delete')")
         b.wait_visible("#networking")
         b.wait_not_present("#networking-interfaces tr[data-interface='tbridge']")
+
+        # Check that the former members are displayed and both On
+        # Fixed in PR #12400
+        if m.image not in ["rhel-8-0-distropkg"]:
+            self.wait_for_iface(iface1)
+            self.wait_for_iface(iface2)
 
     def testBridgeActive(self):
         b = self.browser

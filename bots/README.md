@@ -6,8 +6,8 @@ releasing Cockpit and more.
 
 ## Images
 
-In order to test Cockpit it is staged into an operating system
-image. These images are tracked in the ```bots/images``` directory.
+In order to test Cockpit-related projects, they are staged into an operating
+system image. These images are tracked in the ```bots/images``` directory.
 
 These well known image names are expected to contain no ```.```
 characters and have no file name extension.
@@ -17,11 +17,16 @@ For managing these images:
  * image-download: Download test images
  * image-upload: Upload test images
  * image-create: Create test machine images
+ * image-customize: Generic tool to install packages, upload files, or run
+   commands in a test machine image
  * image-prepare: Build and install Cockpit packages into a test machine image
+   (specific to the cockpit project itself, thus it is in test/, not bots/)
 
 For debugging the images:
 
- * test/vm-run: Run a test machine image
+ * bots/vm-run: Run a test machine image
+ * bots/vm-reset: Remove all overlays from image-customize, image-prepare, etc
+   from test/images/
 
 In case of `qemu-system-x86_64: -netdev bridge,br=cockpit1,id=bridge0: bridge helper failed`
 error, please [allow][1] `qemu-bridge-helper` to access the bridge settings.
@@ -70,7 +75,7 @@ If you want to run all tests on pull request #1234 that has been
 opened by someone who is not in our white-list, run tests-trigger
 like so:
 
-    $ bots/github-trigger -f 1234
+    $ bots/tests-trigger -f 1234
 
 Of course, you should make sure that the pull request is proper and
 doesn't execute evil code during tests.

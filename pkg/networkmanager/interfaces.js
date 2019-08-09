@@ -18,6 +18,9 @@
  */
 
 import $ from 'jquery';
+import React from "react";
+import ReactDOM from "react-dom";
+import { OnOffSwitch } from "cockpit-components-onoff.jsx";
 import cockpit from 'cockpit';
 
 import firewall from './firewall-client.js';
@@ -215,6 +218,23 @@ function NetworkManagerModel() {
     var client = cockpit.dbus("org.freedesktop.NetworkManager", options);
 
     self.client = client;
+
+    /* resolved once first stage of initialization is done */
+    self.preinit = new Promise((resolve, reject) => {
+        client.call("/org/freedesktop/NetworkManager",
+                    "org.freedesktop.DBus.Properties", "Get",
+                    ["org.freedesktop.NetworkManager", "State"], { flags: "" })
+                .fail(complain)
+                .done((reply, options) => {
+                    if (options.flags) {
+                        if (options.flags.indexOf(">") !== -1)
+                            utils.set_byteorder("be");
+                        else if (options.flags.indexOf("<") !== -1)
+                            utils.set_byteorder("le");
+                        resolve();
+                    }
+                });
+    });
 
     /* Mostly generic D-Bus stuff.  */
 
@@ -469,28 +489,20 @@ function NetworkManagerModel() {
         nm_service.start();
     });
 
-    client.call("/org/freedesktop/NetworkManager",
-                "org.freedesktop.DBus.Properties", "Get",
-                ["org.freedesktop.NetworkManager", "State"], { flags: "" })
-            .fail(complain)
-            .done(function(reply, options) {
-                if (options.flags) {
-                    if (options.flags.indexOf(">") !== -1)
-                        utils.set_byteorder("be");
-                    else if (options.flags.indexOf("<") !== -1)
-                        utils.set_byteorder("le");
-                }
-            });
+    var subscription;
+    var watch;
 
-    var subscription = client.subscribe({ }, signal_emitted);
-    var watch = client.watch({ });
-    $(client).on("notify", function(event, data) {
-        $.each(data, function(path, ifaces) {
-            $.each(ifaces, function(iface, props) {
-                if (props)
-                    interface_properties(path, iface, props);
-                else
-                    interface_removed(path, iface);
+    self.preinit.then(() => {
+        subscription = client.subscribe({ }, signal_emitted);
+        watch = client.watch({ });
+        $(client).on("notify", function(event, data) {
+            $.each(data, function(path, ifaces) {
+                $.each(ifaces, function(iface, props) {
+                    if (props)
+                        interface_properties(path, iface, props);
+                    else
+                        interface_removed(path, iface);
+                });
             });
         });
     });
@@ -552,7 +564,7 @@ function NetworkManagerModel() {
         return [ utils.ip6_to_text(addr[0]),
             utils.ip_prefix_to_text(addr[1]),
             utils.ip6_to_text(addr[2], true),
-            utils.ip_metric_to_text(addr[1]),
+            utils.ip_metric_to_text(addr[3]),
         ];
     }
 
@@ -2218,15 +2230,6 @@ PageNetworkInterface.prototype = {
 
         $('#network-interface-delete').syn_click(self.model, $.proxy(this, "delete_connections"));
 
-        this.device_onoff = $("#network-interface-delete-switch").onoff()
-                .on("change", function() {
-                    var val = $(this).onoff("value");
-                    if (val)
-                        self.connect();
-                    else
-                        self.disconnect();
-                });
-
         function highlight_netdev_row(event, id) {
             $('#network-interface-slaves tr').removeClass('highlight-ct');
             if (id) {
@@ -2303,14 +2306,33 @@ PageNetworkInterface.prototype = {
             }
         }
 
-        firewall.addEventListener('changed', function () {
+        function renderFirewallState(pending) {
+            ReactDOM.render(
+                React.createElement(OnOffSwitch, {
+                    id: 'networking-firewall-switch',
+                    state: firewall.enabled,
+                    disabled: pending,
+                    onChange: onFirewallSwitchChange }),
+                document.querySelector('#networking-firewall .panel-actions')
+            );
+        }
+
+        function onFirewallSwitchChange(enable) {
+            renderFirewallState(true);
+            if (enable)
+                firewall.enable().then(() => renderFirewallState());
+            else
+                firewall.disable().then(() => renderFirewallState());
+        }
+
+        function onFirewallChanged() {
             if (!firewall.installed) {
                 $('#networking-firewall').hide();
                 return;
             }
 
             $('#networking-firewall').show();
-            $('#networking-firewall-switch').onoff('value', firewall.enabled);
+            renderFirewallState();
 
             var n = firewall.enabledServices.size;
 
@@ -2318,22 +2340,10 @@ PageNetworkInterface.prototype = {
             var summary = cockpit.format(cockpit.ngettext('$0 Active Rule', '$0 Active Rules', n), n.toString());
 
             $('#networking-firewall-summary').text(summary);
-        });
+        }
 
-        $('#networking-firewall-switch').on('change', function () {
-            var self = $(this);
-
-            self.onoff('disabled');
-
-            function enableSwitch() {
-                self.onoff('disabled', false);
-            }
-
-            if ($(this).onoff('value'))
-                firewall.enable().then(enableSwitch);
-            else
-                firewall.disable().then(enableSwitch);
-        });
+        firewall.addEventListener('changed', onFirewallChanged);
+        onFirewallChanged();
 
         $(window).on('resize', function () {
             self.rx_plot.resize();
@@ -2571,9 +2581,14 @@ PageNetworkInterface.prototype = {
         /* Disable the On/Off button for interfaces that we don't know about at all,
            and for devices that NM declares to be unavailable. Neither can be activated.
          */
-        this.device_onoff.onoff("disabled", !!(!iface || (dev && dev.State == 20)));
-        this.device_onoff.onoff("value", !!(dev && dev.ActiveConnection));
-        this.device_onoff.toggle(managed);
+        var onoff = null;
+        if (managed) {
+            onoff = React.createElement(OnOffSwitch, {
+                state: !!(dev && dev.ActiveConnection),
+                disabled: !iface || (dev && dev.State == 20),
+                onChange: enable => enable ? self.connect() : self.disconnect() });
+        }
+        ReactDOM.render(onoff, document.getElementById('network-interface-delete-switch'));
 
         var is_deletable = (iface && !dev) || (dev && (dev.DeviceType == 'bond' ||
                                                        dev.DeviceType == 'team' ||
@@ -2980,7 +2995,7 @@ PageNetworkInterface.prototype = {
             }
 
             $('#network-interface-slaves thead th:first-child')
-                    .text(cs.type == "bond" ? _("Members") : _("Ports"));
+                    .text(cs.type == "bond" ? _("Interfaces") : _("Ports"));
 
             con.Slaves.forEach(function (slave_con) {
                 slave_con.Interfaces.forEach(function(iface) {
@@ -3043,8 +3058,8 @@ PageNetworkInterface.prototype = {
                                                         with_checkpoint(
                                                             self.model,
                                                             function () {
-                                                                return slave_con.delete_()
-                                                                        .fail(show_unexpected_error);
+                                                                return (free_slave_connection(slave_con)
+                                                                        .fail(show_unexpected_error));
                                                             },
                                                             {
                                                                 devices: dev ? [ dev ] : [ ],
@@ -3123,11 +3138,22 @@ function PageNetworkInterface(model) {
 }
 
 function switchbox(val, callback) {
-    var onoff = $('<div class="btn-onoff-ct">').onoff();
-    onoff.onoff("value", val);
-    onoff.on("change", function () {
-        callback(onoff.onoff("value"));
-    });
+    var onoff = $('<span>');
+    var enabled = true;
+    function render () {
+        ReactDOM.render(
+            React.createElement(OnOffSwitch, {
+                state: val,
+                enabled: enabled,
+                onChange: callback
+            }),
+            onoff[0]);
+    }
+    onoff.enable = function (val) {
+        enabled = val;
+        render();
+    };
+    render();
     return onoff;
 }
 
@@ -3210,7 +3236,7 @@ PageNetworkIpSettings.prototype = {
                     self.update();
                 }));
             btn.enable = function enable(val) {
-                onoff.onoff("disabled", !val);
+                onoff.enable(val);
             };
             return btn;
         }
@@ -3463,7 +3489,7 @@ function free_slave_connection(con) {
         delete cs.master;
         delete con.Settings.team_port;
         delete con.Settings.bridge_port;
-        return con.apply_settings(con.Settings);
+        return con.apply_settings(con.Settings).then(() => { con.activate(null, null) });
     }
 }
 
@@ -4688,24 +4714,26 @@ function init() {
 
     model = new NetworkManagerModel();
 
-    overview_page = new PageNetworking(model);
-    overview_page.setup();
+    model.preinit.then(() => {
+        overview_page = new PageNetworking(model);
+        overview_page.setup();
 
-    interface_page = new PageNetworkInterface(model);
-    interface_page.setup();
+        interface_page = new PageNetworkInterface(model);
+        interface_page.setup();
 
-    dialog_setup(new PageNetworkIpSettings());
-    dialog_setup(new PageNetworkBondSettings());
-    dialog_setup(new PageNetworkTeamSettings());
-    dialog_setup(new PageNetworkTeamPortSettings());
-    dialog_setup(new PageNetworkBridgeSettings());
-    dialog_setup(new PageNetworkBridgePortSettings());
-    dialog_setup(new PageNetworkVlanSettings());
-    dialog_setup(new PageNetworkMtuSettings());
-    dialog_setup(new PageNetworkMacSettings());
+        dialog_setup(new PageNetworkIpSettings());
+        dialog_setup(new PageNetworkBondSettings());
+        dialog_setup(new PageNetworkTeamSettings());
+        dialog_setup(new PageNetworkTeamPortSettings());
+        dialog_setup(new PageNetworkBridgeSettings());
+        dialog_setup(new PageNetworkBridgePortSettings());
+        dialog_setup(new PageNetworkVlanSettings());
+        dialog_setup(new PageNetworkMtuSettings());
+        dialog_setup(new PageNetworkMacSettings());
 
-    $(cockpit).on("locationchanged", navigate);
-    navigate();
+        $(cockpit).on("locationchanged", navigate);
+        navigate();
+    });
 }
 
 $(init);

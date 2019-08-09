@@ -58,18 +58,25 @@ dist/base1/cockpit.min.css.map: dist/base1/cockpit.min.css
 dist/base1/patternfly.min.css.map: dist/base1/patternfly.min.css
 
 # Modify the patternfly files appropriately
-dist/base1/patternfly-base.css: dist/base1/patternfly.css.map
+dist/base1/patternfly.css.map: dist/base1/patternfly-base.css
+dist/base1/patternfly-base.css: src/base1/patternfly-overrides.less
 	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && \
-	sed -f $(srcdir)/tools/patternfly.sed $(srcdir)/node_modules/patternfly/dist/css/patternfly.css > $@.tmp && $(MV) $@.tmp $@
-dist/base1/patternfly.css.map:
-	$(V_COPY) $(MKDIR_P) $(dir $@) && \
-	cp $(srcdir)/node_modules/patternfly/dist/css/patternfly.css.map $@.tmp && $(MV) $@.tmp $@
-dist/base1/patternfly-additions.css: dist/base1/patternfly-additions.css.map
+	F=$(srcdir)/node_modules/patternfly/dist/less/patternfly.less && \
+	sed '/@import "variables.less"/ s^$$^\n@import "../../../../src/base1/patternfly-overrides.less";^' $$F > $$F.patched && \
+	$(LESSC) --source-map=dist/base1/patternfly.css.map --source-map-include-source $$F.patched $@.tmp && \
+	sed -i -f $(srcdir)/tools/patternfly.sed $@.tmp && \
+	rm $$F.patched && \
+	$(MV) $@.tmp $@
+
+dist/base1/patternfly-additions.css.map: dist/base1/patternfly-additions.css
+dist/base1/patternfly-additions.css: src/base1/patternfly-overrides.less
 	$(AM_V_GEN) $(MKDIR_P) $(dir $@) && \
-	sed -f $(srcdir)/tools/patternfly.sed $(srcdir)/node_modules/patternfly/dist/css/patternfly-additions.css > $@.tmp && $(MV) $@.tmp $@
-dist/base1/patternfly-additions.css.map:
-	$(V_COPY) $(MKDIR_P) $(dir $@) && \
-	cp $(srcdir)/node_modules/patternfly/dist/css/patternfly-additions.css.map $@.tmp && $(MV) $@.tmp $@
+	F=$(srcdir)/node_modules/patternfly/dist/less/patternfly-additions.less && \
+	sed '/@import "variables.less"/ s^$$^\n@import "../../../../src/base1/patternfly-overrides.less";^' $$F > $$F.patched && \
+	$(LESSC) --source-map=$@.map --source-map-include-source $$F.patched $@.tmp && \
+	sed -i -f $(srcdir)/tools/patternfly.sed $@.tmp && \
+	rm $$F.patched && \
+	$(MV) $@.tmp $@
 
 dist/base1/fonts/fontawesome.woff:
 	$(V_COPY) $(MKDIR_P) $(dir $@) && \
@@ -113,7 +120,6 @@ base_QUNIT_TESTS = \
 	dist/base1/test-series.html \
 	dist/base1/test-cache.html \
 	dist/base1/test-websocket.html \
-	dist/base1/test-stub.html \
 	dist/base1/test-browser-storage.html \
 	dist/base1/test-promise.html \
 	dist/base1/test-protocol.html \
@@ -210,6 +216,7 @@ EXTRA_DIST += \
 	src/base1/cockpit.js \
 	src/base1/deprecated.js \
 	src/base1/manifest.json \
+	src/base1/patternfly-overrides.less \
 	src/base1/simple-tap.js \
 	src/base1/test-dbus-common.js \
 	$(base_DATA) \

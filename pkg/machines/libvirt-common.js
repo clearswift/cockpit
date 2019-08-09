@@ -15,7 +15,7 @@ import {
 
 import {
     checkLibvirtStatus,
-    getAllVms,
+    getApiData,
     getHypervisorMaxVCPU,
     getLoggedInUser,
     getOsInfoList
@@ -36,7 +36,6 @@ import {
 
 import {
     finishVmCreateInProgress,
-    finishVmInstallInProgress,
     removeVmCreateInProgress,
     setVmCreateInProgress,
     setVmInstallInProgress,
@@ -178,6 +177,7 @@ export function parseDumpxml(dispatch, connectionName, domXml, id_overwrite) {
 
     const osElem = domainElem.getElementsByTagNameNS("", "os")[0];
     const currentMemoryElem = domainElem.getElementsByTagName("currentMemory")[0];
+    const memoryElem = domainElem.getElementsByTagName("memory")[0];
     const vcpuElem = domainElem.getElementsByTagName("vcpu")[0];
     const cpuElem = domainElem.getElementsByTagName("cpu")[0];
     const vcpuCurrentAttr = vcpuElem.attributes.getNamedItem('current');
@@ -195,6 +195,8 @@ export function parseDumpxml(dispatch, connectionName, domXml, id_overwrite) {
 
     const currentMemoryUnit = currentMemoryElem.getAttribute("unit");
     const currentMemory = convertToUnit(currentMemoryElem.childNodes[0].nodeValue, currentMemoryUnit, units.KiB);
+    const memoryUnit = memoryElem.getAttribute("unit");
+    const memory = convertToUnit(memoryElem.childNodes[0].nodeValue, memoryUnit, units.KiB);
 
     const vcpus = parseDumpxmlForVCPU(vcpuElem, vcpuCurrentAttr);
 
@@ -225,6 +227,7 @@ export function parseDumpxml(dispatch, connectionName, domXml, id_overwrite) {
         osBoot,
         arch,
         currentMemory,
+        memory,
         vcpus,
         disks,
         emulatedMachine,
@@ -762,24 +765,9 @@ export function parseNodeDeviceDumpxml(nodeDevice) {
 }
 
 export function parseOsInfoList(dispatch, osList) {
-    const osColumnsNames = ['id', 'shortId', 'name', 'version', 'family', 'vendor', 'releaseDate', 'eolDate', 'codename'];
-    let parsedList = [];
+    const osinfodata = JSON.parse(osList);
 
-    osList.split('\n').forEach(line => {
-        const osColumns = line.split('|');
-
-        const result = {};
-
-        for (let i = 0; i < osColumnsNames.length; i++) {
-            result[osColumnsNames[i]] = osColumns.length > i ? osColumns[i] : null;
-        }
-
-        if (result.shortId) {
-            parsedList.push(result);
-        }
-    });
-
-    dispatch(updateOsInfoList(parsedList));
+    dispatch(updateOsInfoList(osinfodata.filter(os => os['shortId'])));
 }
 
 export function parseStoragePoolDumpxml(connectionName, storagePoolXml, id_overwrite) {
@@ -792,6 +780,9 @@ export function parseStoragePoolDumpxml(connectionName, storagePoolXml, id_overw
     result['type'] = storagePoolElem.getAttribute('type');
     result['name'] = storagePoolElem.getElementsByTagName('name')[0].childNodes[0].nodeValue;
     result['id'] = id_overwrite || storagePoolElem.getElementsByTagName('uuid')[0].childNodes[0].nodeValue;
+    result['capacity'] = storagePoolElem.getElementsByTagName('capacity')[0].childNodes[0].nodeValue;
+    result['available'] = storagePoolElem.getElementsByTagName('available')[0].childNodes[0].nodeValue;
+    result['allocation'] = storagePoolElem.getElementsByTagName('allocation')[0].childNodes[0].nodeValue;
 
     // Fetch path property if target is contained for this type of pool
     if (['dir', 'fs', 'netfs', 'logical', 'disk', 'iscsi', 'scsi', 'mpath', 'zfs'].indexOf(result.type) > -1) {
@@ -813,6 +804,14 @@ export function parseStoragePoolDumpxml(connectionName, storagePoolXml, id_overw
         const dirElem = sourceElem.getElementsByTagName('dir');
         if (dirElem[0])
             result['source']['dir'] = { 'path': dirElem[0].getAttribute('path') };
+
+        const sourceNameElem = sourceElem.getElementsByTagName('name');
+        if (sourceNameElem[0])
+            result['source']['name'] = sourceNameElem[0].childNodes[0].nodeValue;
+
+        const formatElem = sourceElem.getElementsByTagName('format');
+        if (formatElem[0])
+            result['source']['format'] = { 'type': formatElem[0].getAttribute('type') };
     }
 
     return result;
@@ -833,7 +832,7 @@ export function parseStorageVolumeDumpxml(connectionName, storageVolumeXml, id_o
     const physicalElem = storageVolumeElem.getElementsByTagName('physical')[0];
     const physical = physicalElem ? physicalElem.childNodes[0].nodeValue : NaN;
     const formatElem = storageVolumeElem.getElementsByTagName('format')[0];
-    const format = formatElem.getAttribute('type');
+    const format = formatElem ? formatElem.getAttribute('type') : undefined;
     return {
         connectionName,
         name,
@@ -1078,7 +1077,21 @@ export function updateBootOrder(domXml, devices) {
     }
 
     const tmp = document.createElement("div");
+    tmp.appendChild(domainElem);
 
+    return tmp.innerHTML;
+}
+
+/*
+ * This function is used to define only offline attribute of memory.
+ */
+export function updateMaxMemory(domXml, maxMemory) {
+    const domainElem = getDomainElem(domXml);
+
+    let memElem = domainElem.getElementsByTagName("memory")[0];
+    memElem.textContent = `${maxMemory}`;
+
+    let tmp = document.createElement("div");
     tmp.appendChild(domainElem);
 
     return tmp.innerHTML;
@@ -1178,7 +1191,7 @@ export function CONSOLE_VM({
     };
 }
 
-export function CREATE_VM({ connectionName, vmName, source, sourceType, os, memorySize, storageSize, startVm }) {
+export function CREATE_VM({ connectionName, vmName, source, sourceType, os, memorySize, storageSize, startVm, storagePool, storageVolume }) {
     logDebug(`${this.name}.CREATE_VM(${vmName}):`);
     return dispatch => {
         // shows dummy vm  until we get vm from virsh (cleans up inProgress)
@@ -1197,11 +1210,13 @@ export function CREATE_VM({ connectionName, vmName, source, sourceType, os, memo
             memorySize,
             storageSize,
             startVm,
+            storagePool,
+            storageVolume,
         ], { err: "message", environ: ['LC_ALL=C'] })
                 .done(() => {
                     finishVmCreateInProgress(dispatch, vmName);
                     if (startVm) {
-                        finishVmInstallInProgress(dispatch, vmName);
+                        clearVmUiState(dispatch, vmName);
                     }
                 })
                 .fail((exception, data) => {
@@ -1239,6 +1254,7 @@ export function GET_OS_INFO_LIST () {
                 parseOsInfoList(dispatch, osList);
             })
             .fail((exception, data) => {
+                parseOsInfoList(dispatch, '');
                 console.error(`get os list returned error: "${JSON.stringify(exception)}", data: "${JSON.stringify(data)}"`);
             });
 }
@@ -1254,7 +1270,7 @@ export function INIT_DATA_RETRIEVAL () {
                     const name = match ? match[0] : null;
                     dispatch(updateLibvirtState({ name }));
                     if (name) {
-                        dispatch(getAllVms(null, name));
+                        dispatch(getApiData(null, name));
                     } else {
                         console.error("initialize failed: getting libvirt service name failed");
                     }
@@ -1285,9 +1301,9 @@ export function INSTALL_VM({ name, vcpus, currentMemory, metadata, disks, displa
             prepareDisksParam(disks),
             prepareDisplaysParam(displays),
         ], { err: "message", environ: ['LC_ALL=C'] })
-                .done(() => finishVmInstallInProgress(dispatch, name))
+                .done(() => clearVmUiState(dispatch, name))
                 .fail(ex => {
-                    finishVmInstallInProgress(dispatch, name, { openConsoleTab: false });
+                    clearVmUiState(dispatch, name); // inProgress cleanup
                     buildScriptTimeoutFailHandler(
                         () => onAddErrorNotification({ text: cockpit.format(_("VM $0 failed to get installed"), name), detail: ex.message })
                         , VMS_CONFIG.WaitForRetryInstallVm);

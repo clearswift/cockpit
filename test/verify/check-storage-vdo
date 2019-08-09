@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -61,15 +60,15 @@ class TestStorage(StorageCase):
         b.wait_visible("#storage-detail")
 
         def detail(index):
-            return '#detail-header div.ct-form-layout label:nth-of-type(%s) + div' % index
+            return '#detail-header div.ct-form label:nth-of-type(%s) + div' % index
 
         b.wait_text(detail(1), "/dev/mapper/vdo0")
         b.wait_in_text(detail(2), "vdo_vgroup")
         b.wait_in_text(detail(3), "used of 5 GiB")
         b.wait_in_text(detail(4), "used of 5 GiB")
         b.wait_text(detail(5), "256 MiB")
-        b.wait_present(detail(6) + " .active:contains(On)")
-        b.wait_present(detail(7) + " .active:contains(On)")
+        b.wait_present(detail(6) + " input:checked")
+        b.wait_present(detail(7) + " input:checked")
 
         # Make a filesystem on it
 
@@ -171,7 +170,6 @@ config: !Configuration
 
         b.wait_in_text("#vdos", "vdo0")
         b.click("#vdos tr:contains(vdo0)")
-        b.wait_visible("#storage-detail")
 
         b.click("#storage-detail .alert-danger button:contains('Remove device')")
         b.wait_visible("#storage")

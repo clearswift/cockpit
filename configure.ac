@@ -50,6 +50,10 @@ AC_ISC_POSIX
 AC_HEADER_STDC
 AC_PROG_LN_S
 
+# HACK - Prevent valgrind false-positives due to GHashTable trickery
+AC_CHECK_SIZEOF([void *])
+AM_CONDITIONAL([VALGRIND_MINADDR_HACK], [test "$ac_cv_sizeof_void_p" -eq 8])
+
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_MSG_CHECKING([whether to install to prefix only])
@@ -70,6 +74,7 @@ LIBSYSTEMD_REQUIREMENT="libsystemd"
 LIBSYSTEMD_REQUIREMENT_OLD="libsystemd-journal >= 187 libsystemd-daemon libsystemd-login"
 JSON_GLIB_REQUIREMENT="json-glib-1.0 >= 0.14.0"
 POLKIT_REQUIREMENT="polkit-agent-1 >= 0.105"
+GNUTLS_REQUIREMENT="gnutls >= 3.3.0"
 
 PKG_CHECK_MODULES(GIO, [$GIO_REQUIREMENT])
 GLIB_VERSION_DEF="GLIB_VERSION_$(echo $GLIB_VERSION | tr '.' '_')"
@@ -81,6 +86,7 @@ PKG_CHECK_MODULES(LIBSYSTEMD, [$LIBSYSTEMD_REQUIREMENT], [], [
 ])
 PKG_CHECK_MODULES(JSON_GLIB, [$JSON_GLIB_REQUIREMENT])
 PKG_CHECK_MODULES(POLKIT, [$POLKIT_REQUIREMENT])
+PKG_CHECK_MODULES(GNUTLS, [$GNUTLS_REQUIREMENT])
 
 # HACK: We can't yet use the new krb5 pkg-config file
 AC_PATH_PROG(KRB5_CONFIG, krb5-config)
@@ -117,6 +123,11 @@ COCKPIT_WS_CFLAGS="$COCKPIT_CFLAGS"
 COCKPIT_WS_LIBS="$COCKPIT_LIBS"
 AC_SUBST(COCKPIT_WS_CFLAGS)
 AC_SUBST(COCKPIT_WS_LIBS)
+
+COCKPIT_TLS_CFLAGS="$GNUTLS_CFLAGS"
+COCKPIT_TLS_LIBS="$GNUTLS_LIBS"
+AC_SUBST(COCKPIT_TLS_CFLAGS)
+AC_SUBST(COCKPIT_TLS_LIBS)
 
 # whether to build cockpit-ssh
 AC_ARG_ENABLE(ssh, AC_HELP_STRING([--disable-ssh], [Disable cockpit-ssh build and libssh dependency]))
@@ -556,8 +567,6 @@ AM_PATH_PYTHON([2.7])
 #
 
 AC_SUBST(PAM_LIBS)
-
-AC_DEFINE([MAX_PACKET_SIZE], [65536], [Maximum size of packet messages])
 
 AC_OUTPUT([
 Makefile

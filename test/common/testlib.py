@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This file is part of Cockpit.
 #
 # Copyright (C) 2013 Red Hat, Inc.
@@ -61,6 +59,7 @@ __all__ = (
     'Browser',
     'MachineCase',
     'skipImage',
+    'allowImage',
     'skipPackage',
     'enableAxe',
     'Error',
@@ -109,7 +108,7 @@ class Browser:
     def title(self):
         return self.cdp.eval('document.title')
 
-    def open(self, href, cookie=None):
+    def open(self, href, cookie=None, tls=False):
         """
         Load a page into the browser.
 
@@ -122,7 +121,8 @@ class Browser:
           Error: When a timeout occurs waiting for the page to load.
         """
         if href.startswith("/"):
-            href = "http://%s:%s%s" % (self.address, self.port, href)
+            schema = tls and "https" or "http"
+            href = "%s://%s:%s%s" % (schema, self.address, self.port, href)
 
         if cookie:
             self.cdp.invoke("Network.setCookie", **cookie)
@@ -203,23 +203,23 @@ class Browser:
         #    hash = "/@" + host + hash
         self.call_js_func('ph_go', hash)
 
-    def mouse(self, selector, type, x=0, y=0, btn=0, force=False):
-        self.wait_present(selector)
-        self.call_js_func('ph_mouse', selector, type, x, y, btn, force)
+    def mouse(self, selector, type, x=0, y=0, btn=0, ctrlKey=False, shiftKey=False, altKey=False, metaKey=False):
+        self.wait_visible(selector)
+        self.call_js_func('ph_mouse', selector, type, x, y, btn, ctrlKey, shiftKey, altKey, metaKey)
 
-    def click(self, selector, force=False):
-        self.mouse(selector, "click", 0, 0, 0, force)
+    def click(self, selector):
+        self.mouse(selector + ":not([disabled])", "click", 0, 0, 0)
 
     def val(self, selector):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         return self.call_js_func('ph_val', selector)
 
     def set_val(self, selector, val):
-        self.wait_present(selector)
+        self.wait_visible(selector + ':not([disabled])')
         self.call_js_func('ph_set_val', selector, val)
 
     def text(self, selector):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         return self.call_js_func('ph_text', selector)
 
     def attr(self, selector, attr):
@@ -227,19 +227,19 @@ class Browser:
         return self.call_js_func('ph_attr', selector, attr)
 
     def set_attr(self, selector, attr, val):
-        self.wait_present(selector)
+        self.wait_present(selector + ':not([disabled])')
         self.call_js_func('ph_set_attr', selector, attr, val and 'true' or 'false')
 
     def set_checked(self, selector, val):
-        self.wait_present(selector)
+        self.wait_visible(selector + ':not([disabled])')
         self.call_js_func('ph_set_checked', selector, val)
 
     def focus(self, selector):
-        self.wait_present(selector)
+        self.wait_visible(selector + ':not([disabled])')
         self.call_js_func('ph_focus', selector)
 
     def blur(self, selector):
-        self.wait_present(selector)
+        self.wait_visible(selector + ':not([disabled])')
         self.call_js_func('ph_blur', selector)
 
     def key_press(self, keys, modifiers=0):
@@ -259,16 +259,16 @@ class Browser:
     def select_from_dropdown(self, selector, value, substring=False):
         # This is a backwards compat helper method; new code should use .set_val()
 
-        self.wait_visible(selector)
+        self.wait_visible(selector + ':not([disabled])')
 
         # translate text value into <option value=".."> ID
         text_selector = "{0} option[data-value{1}='{2}']".format(selector, substring and "*" or "", value)
         self.wait_present(text_selector)
         value_id = self.attr(text_selector, "value")
         self.set_val(selector, value_id)
+        self.wait_val(selector, value_id)
 
     def set_input_text(self, selector, val, append=False, value_check=True):
-        self.wait_present(selector)
         self.focus(selector)
         if not append:
             self.key_press("a", 2) # Ctrl + a
@@ -286,7 +286,7 @@ class Browser:
         spinner_selector = "{0} .spinner".format(selector)
         file_item_selector_template = "{0} ul li a:contains({1})"
 
-        self.wait_visible(selector)
+        self.wait_visible(selector + ':not([disabled])')
 
         for path_part in filter(None, location.split('/')):
             self.wait_not_present(spinner_selector)
@@ -351,11 +351,11 @@ class Browser:
         self.wait_js_func('ph_is_visible', selector)
 
     def wait_val(self, selector, val):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('ph_has_val', selector, val)
 
     def wait_not_val(self, selector, val):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('!ph_has_val', selector, val)
 
     def wait_attr(self, selector, attr, val):
@@ -378,19 +378,22 @@ class Browser:
         self.wait_js_func('!ph_is_visible', selector)
 
     def wait_in_text(self, selector, text):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('ph_in_text', selector, text)
 
     def wait_not_in_text(self, selector, text):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('!ph_in_text', selector, text)
 
+    def wait_collected_text(self, selector, text):
+        self.wait_js_func('ph_collected_text_is', selector, text)
+
     def wait_text(self, selector, text):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('ph_text_is', selector, text)
 
     def wait_text_not(self, selector, text):
-        self.wait_present(selector)
+        self.wait_visible(selector)
         self.wait_js_func('!ph_text_is', selector, text)
 
     def wait_popup(self, id):
@@ -456,7 +459,7 @@ class Browser:
                 if reconnect and ex.msg.startswith('timeout'):
                     reconnect = False
                     if self.is_present("#machine-reconnect"):
-                        self.click("#machine-reconnect", True)
+                        self.click("#machine-reconnect")
                         self.wait_not_visible(".curtains-ct")
                         continue
                 raise
@@ -475,19 +478,21 @@ class Browser:
         # We don't need to open the menu, it's enough to simulate a
         # click on the invisible button.
         if entry:
-            self.click(sel + ' a:contains("%s")' % entry, True)
+            self.click(sel + ' a:contains("%s")' % entry)
         else:
             self.click(sel + ' button:first-child')
 
-    def login_and_go(self, path=None, user=None, host=None, authorized=True):
+    def login_and_go(self, path=None, user=None, host=None, authorized=True, urlroot=None, tls=False):
         if user is None:
             user = self.default_user
         href = path
         if not href:
             href = "/"
+        if urlroot:
+            href = urlroot + href
         if host:
             href = "/@" + host + href
-        self.open(href)
+        self.open(href, tls=tls)
         self.wait_visible("#login")
         self.set_val('#login-user-input', user)
         self.set_val('#login-password-input', self.password)
@@ -778,9 +783,9 @@ class MachineCase(unittest.TestCase):
             self.check_browser_errors()
         shutil.rmtree(self.tmpdir)
 
-    def login_and_go(self, path=None, user=None, host=None, authorized=True, tls=False):
+    def login_and_go(self, path=None, user=None, host=None, authorized=True, urlroot=None, tls=False):
         self.machine.start_cockpit(host, tls=tls)
-        self.browser.login_and_go(path, user=user, host=host, authorized=authorized)
+        self.browser.login_and_go(path, user=user, host=host, authorized=authorized, urlroot=urlroot, tls=tls)
 
     allow_core_dumps = False
 
@@ -874,12 +879,14 @@ class MachineCase(unittest.TestCase):
                                     ".*couldn't create polkit session subject: No session for pid.*",
                                     "We are no longer a registered authentication agent.",
                                     ".*: failed to retrieve resource: terminated",
+                                    ".*: external channel failed: terminated",
                                     'audit:.*denied.*comm="systemd-user-se".*nologin.*',
 
                                     'localhost: dropping message while waiting for child to exit',
                                     '.*: GDBus.Error:org.freedesktop.PolicyKit1.Error.Failed: .*',
                                     '.*g_dbus_connection_call_finish_internal.*G_IS_DBUS_CONNECTION.*',
                                     '.*Message recipient disconnected from message bus without replying.*',
+                                    '.*Unable to shutdown socket: Transport endpoint is not connected.*',
 
                                     # If restarts or reloads happen really fast, the code in python.js
                                     # that figures out which python to use crashes with SIGPIPE,
@@ -918,19 +925,9 @@ class MachineCase(unittest.TestCase):
         if "TEST_AUDIT_NO_SELINUX" not in os.environ:
             messages += machine.audit_messages("14", cursor=cursor) # 14xx is selinux
 
-        if self.image in ['fedora-29', 'fedora-30', 'fedora-testing', 'fedora-i386', 'fedora-atomic']:
-            # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1563143
-            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { getattr } for .* comm="which" path="/usr/sbin/setfiles".*')
-            # HACK: https://bugzilla.redhat.com/show_bug.cgi?id=1662866
-            self.allowed_messages.append('audit: type=1400 audit(.*): avc:  denied  { execute } for .* comm="which" .*pcp_pmlogger_t.*')
-
-        if self.image in ['fedora-30']:
+        if self.image in ['fedora-30', 'fedora-testing', 'fedora-i386']:
             # Fedora 30 switched to dbus-broker
             self.allowed_messages.append("dbus-daemon didn't send us a dbus address; not installed?.*")
-
-        # these images don't have tuned; keep in sync with bots/images/scripts/debian.setup
-        if self.image in ["debian-stable"]:
-            self.allowed_messages.append('com.redhat.tuned: .*org.freedesktop.DBus.Error.ServiceUnknown.*')
 
         all_found = True
         first = None
@@ -1074,6 +1071,12 @@ def jsquote(str):
 
 def skipImage(reason, *args):
     if testvm.DEFAULT_IMAGE in args:
+        return unittest.skip("{0}: {1}".format(testvm.DEFAULT_IMAGE, reason))
+    return lambda func: func
+
+
+def allowImage(reason, *args):
+    if testvm.DEFAULT_IMAGE not in args:
         return unittest.skip("{0}: {1}".format(testvm.DEFAULT_IMAGE, reason))
     return lambda func: func
 
@@ -1315,6 +1318,17 @@ class TapRunner(object):
         return failed, b"# RETRY " in output
 
 
+def print_tests(tests):
+    for test in tests:
+        if isinstance(test, unittest.TestSuite):
+            print_tests(test)
+        elif isinstance(test, unittest.loader._FailedTest):
+            name = test.id().replace("unittest.loader._FailedTest.", "")
+            print("Error: '{0}' does not match a test".format(name), file=sys.stderr)
+        else:
+            print(test.id().replace("__main__.", ""))
+
+
 def arg_parser():
     parser = argparse.ArgumentParser(description='Run Cockpit test(s)')
     parser.add_argument('-j', '--jobs', dest="jobs", type=int,
@@ -1332,6 +1346,7 @@ def arg_parser():
     parser.add_argument('--nonet', dest="fetch", action="store_false",
                         help="Don't go online to download images or data")
     parser.add_argument('tests', nargs='*')
+    parser.add_argument("-l", "--list", action="store_true", help="Print the list of tests that would be executed")
 
     parser.set_defaults(verbosity=1, fetch=True)
     return parser
@@ -1379,8 +1394,8 @@ def test_main(options=None, suite=None, attachments=None, **kwargs):
     opts.address = getattr(opts, "address", None)
     opts.browser = getattr(opts, "browser", None)
     opts.attachments = os.environ.get("TEST_ATTACHMENTS", attachments)
-    if opts.attachments and not os.path.exists(opts.attachments):
-        os.makedirs(opts.attachments)
+    if opts.attachments:
+        os.makedirs(opts.attachments, exist_ok=True)
 
     import __main__
     if len(opts.tests) > 0:
@@ -1389,6 +1404,10 @@ def test_main(options=None, suite=None, attachments=None, **kwargs):
         suite = unittest.TestLoader().loadTestsFromNames(opts.tests, module=__main__)
     elif not suite:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
+
+    if options.list:
+        print_tests(suite)
+        return 0
 
     runner = TapRunner(verbosity=opts.verbosity, jobs=opts.jobs, thorough=opts.thorough)
     ret = runner.run(suite)

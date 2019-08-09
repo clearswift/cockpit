@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This file is part of Cockpit.
 #
 # Copyright (C) 2013 Red Hat, Inc.
@@ -29,6 +27,7 @@ import sys
 
 from . import exceptions
 from . import timeout as timeoutlib
+from .directories import get_temp_dir
 
 
 class SSHConnection(object):
@@ -137,7 +136,7 @@ class SSHConnection(object):
     def _start_ssh_master(self):
         self._kill_ssh_master()
 
-        control = os.path.join(tempfile.gettempdir(), "ssh-%h-%p-%r-" + str(os.getpid()))
+        control = os.path.join(get_temp_dir(), "ssh-%h-%p-%r-" + str(os.getpid()))
 
         cmd = [
             "ssh",
@@ -323,7 +322,7 @@ class SSHConnection(object):
                             proc.stdout.close()
                         else:
                             if self.verbose:
-                                os.write(sys.stdout.fileno(), data)
+                                os.write(sys.__stdout__.fileno(), data)
                             output += data.decode('utf-8', 'replace')
                     elif fd == stderr_fd:
                         data = os.read(fd, 1024)
@@ -331,7 +330,7 @@ class SSHConnection(object):
                             rset.remove(stderr_fd)
                             proc.stderr.close()
                         elif not quiet or self.verbose:
-                            os.write(sys.stderr.fileno(), data)
+                            os.write(sys.__stderr__.fileno(), data)
                 for fd in ret[1]:
                     if fd == stdin_fd:
                         if input:

@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -57,7 +56,6 @@ def fix_bridge(m):
 
 
 def check_failed_state(b, expected_title):
-    b.wait_present("#troubleshoot-dialog .btn-default:not([disabled])")
     b.wait_in_text('#troubleshoot-dialog .btn-default', "Close")
     b.wait_in_text('#troubleshoot-dialog h4', expected_title)
     b.click("#troubleshoot-dialog .btn-default")
@@ -69,7 +67,6 @@ def start_machine_troubleshoot(b, new=False, known_host=False):
     b.click('#machine-troubleshoot')
     b.wait_popup('troubleshoot-dialog')
     if (new):
-        b.wait_present("#troubleshoot-dialog .btn-primary:not([disabled])")
         b.wait_text('#troubleshoot-dialog .btn-primary', "Add")
         b.click('#troubleshoot-dialog .btn-primary')
 
@@ -201,9 +198,8 @@ class TestMultiMachineAdd(MachineCase):
                                     ".*: bridge failed: .*",
                                     ".*: bridge program failed: Child process exited with code .*")
 
-    @skipImage("Newer version (>= 0.8.5) of libssh required", "debian-stable", "debian-testing",
-               "ubuntu-1804", "ubuntu-stable", "fedora-atomic", "rhel-atomic", "continuous-atomic",
-               "rhel-8-0", "rhel-8-0-distropkg", "centos-7", "rhel-7-6", "rhel-7-6-distropkg", "rhel-7-7")
+    @skipImage("Newer version (>= 0.8.5) of libssh required",
+               "ubuntu-1804", "fedora-atomic", "rhel-8-0", "rhel-8-0-distropkg")
     def testGlobalSSHConfig(self):
         b = self.browser
         m = self.machine
@@ -302,7 +298,6 @@ class TestMultiMachine(MachineCase):
         b.wait_visible("#user-group")
         b.wait_visible("#option-group")
         b.wait_not_visible("#server-group")
-        b.wait_visible("#login-error-message")
         b.wait_in_text("#login-error-message", "Hostkey does not match")
 
         # Clear host key.
@@ -316,7 +311,6 @@ class TestMultiMachine(MachineCase):
         b.wait_visible("#user-group")
         b.wait_visible("#option-group")
         b.wait_not_visible("#server-group")
-        b.wait_visible("#login-error-message")
         b.wait_in_text("#login-error-message", "Host is unknown")
 
         m.execute("echo '\n[SSH-Login]\nallowUnknown = true' >> /etc/cockpit/cockpit.conf")
@@ -342,7 +336,6 @@ class TestMultiMachine(MachineCase):
         b.wait_visible("#user-group")
         b.wait_visible("#option-group")
         b.wait_not_visible("#server-group")
-        b.wait_visible("#login-error-message")
         b.wait_in_text("#login-error-message", "Hostkey is unknown")
 
         b.wait_visible("#login")
@@ -391,10 +384,7 @@ class TestMultiMachine(MachineCase):
         b.click('#login-button')
         b.wait_visible("#login-error-message")
 
-        if m.image in ['rhel-7-6-distropkg']:
-            login_options = '#option-group span'
-        else:
-            login_options = '#show-other-login-options'
+        login_options = '#show-other-login-options'
 
         # Connect to bad machine
         b.set_val("#login-password-input", "bad-password")
@@ -405,40 +395,48 @@ class TestMultiMachine(MachineCase):
         b.wait_not_visible("#server-group")
         b.click('#login-button')
         b.wait_visible("#server-group")
-        b.wait_visible("#login-error-message")
         b.wait_in_text("#login-error-message", "Unable to connect")
 
+        # remote login via "Connect to:" login page field; should connect to unknown hosts
+        m.execute("sed -i '/allowUnknown/d' /etc/cockpit/cockpit.conf")
         m.restart_cockpit()
-        b.open("{0}=10.111.113.2".format(root))
+        b.open(root)
         b.wait_visible("#login")
         b.set_val("#login-user-input", "admin")
 
         # Connect to machine2
+        b.click(login_options)
+        b.wait_visible("#server-group")
         b.set_val("#server-field", "10.111.113.2")
         b.set_val("#login-password-input", "alt-password")
         b.click('#login-button')
         b.wait_in_text("#server-name", "10.111.113.2")
-        b.wait_visible("#conversation-group")
-        b.wait_not_visible("#password-group")
-        b.wait_not_visible("#user-group")
-        b.wait_not_visible("#option-group")
-        b.wait_not_visible("#server-group")
-        b.wait_in_text("#conversation-prompt", "Fingerprint")
-        b.wait_in_text("#conversation-message", "Do you want to proceed this time?")
-        b.click('#login-button')
-        b.expect_load()
-        b.enter_page("/system")
-        b.wait_in_text('#system_information_hostname_button', "machine2")
-        b.switch_to_top()
-        b.wait_js_cond('window.location.pathname == "{0}=10.111.113.2/system"'.format(root))
-
-        if not m2.atomic_image:
-            b.click("a[href='/dashboard']")
-            b.enter_page("/dashboard")
-            b.wait_in_text("a[data-address='localhost']", m2_dashboard_name)
-            b.wait_not_present("a[data-address='10.111.113.2']")
+        # fixed in PR #11736: accept unknown hosts
+        if m.image in ["rhel-8-0-distropkg"]:
+            b.wait_visible("#login-error-message")
+            b.wait_in_text("#login-error-message", "Host is unknown")
         else:
-            b.wait_not_present("a[href='/dashboard']")
+            b.wait_visible("#conversation-group")
+            b.wait_not_visible("#password-group")
+            b.wait_not_visible("#user-group")
+            b.wait_not_visible("#option-group")
+            b.wait_not_visible("#server-group")
+            b.wait_in_text("#conversation-prompt", "Fingerprint")
+            b.wait_in_text("#conversation-message", "Do you want to proceed this time?")
+            b.click('#login-button')
+            b.expect_load()
+            b.enter_page("/system")
+            b.wait_in_text('#system_information_hostname_button', "machine2")
+            b.switch_to_top()
+            b.wait_js_cond('window.location.pathname == "{0}=10.111.113.2/system"'.format(root))
+
+            if not m2.atomic_image:
+                b.click("a[href='/dashboard']")
+                b.enter_page("/dashboard")
+                b.wait_in_text("a[data-address='localhost']", m2_dashboard_name)
+                b.wait_not_present("a[data-address='10.111.113.2']")
+            else:
+                b.wait_not_present("a[href='/dashboard']")
 
         # Might happen when we switch away.
         self.allow_hostkey_messages()
@@ -514,7 +512,6 @@ class TestMultiMachine(MachineCase):
         b.wait_js_cond('window.location.pathname == "/cockpit-new/@10.111.113.2/system"')
 
         # Test subnav
-        b.wait_visible('a[href="/@10.111.113.2/users"]')
         b.click('a[href="/@10.111.113.2/users"]')
         b.enter_page("/users", host="10.111.113.2")
         b.wait_present("#accounts-list")
@@ -592,7 +589,6 @@ class TestMultiMachine(MachineCase):
         # Go to the path, remove the image
         b.go(m2_path)
         b.enter_page("/playground/test", "10.111.113.2")
-        b.wait_visible("img[src='hammer.gif']")
         b.click("img[src='hammer.gif']")
         b.switch_to_top()
 
@@ -709,7 +705,6 @@ class TestMultiMachine(MachineCase):
         # Bad hostkey
         break_hostkey(m1, "10.111.113.2")
         start_machine_troubleshoot(b, True, True)
-        b.wait_present("#troubleshoot-dialog .btn-default:not([disabled])")
         b.wait_in_text('#troubleshoot-dialog .btn-default', "Close")
         b.wait_in_text('#troubleshoot-dialog h4', "Incorrect Host Key")
         b.wait_in_text("#troubleshoot-dialog", "10.111.113.2")
@@ -722,7 +717,6 @@ class TestMultiMachine(MachineCase):
         break_hostkey(m1, "10.111.113.2", filename="/home/admin/.ssh/known_hosts")
 
         start_machine_troubleshoot(b, True, True)
-        b.wait_present("#troubleshoot-dialog .btn-default:not([disabled])")
         b.wait_in_text('#troubleshoot-dialog .btn-default', "Close")
         b.wait_in_text('#troubleshoot-dialog h4', "Incorrect Host Key")
         b.wait_in_text("#troubleshoot-dialog", "10.111.113.2")
@@ -760,7 +754,6 @@ class TestMultiMachine(MachineCase):
         b.click("#machine-reconnect")
         start_machine_troubleshoot(b)
         b.wait_in_text('#troubleshoot-dialog h4', "Unknown Host Key")
-        b.wait_present("#troubleshoot-dialog .btn-primary:not([disabled])")
         b.wait_in_text('#troubleshoot-dialog .btn-primary', "Connect")
         b.click('#troubleshoot-dialog .btn-primary')
         b.wait_popdown('troubleshoot-dialog')
@@ -790,7 +783,6 @@ class TestMultiMachine(MachineCase):
         b.click("#login-type li[value=stored] a")
         b.wait_in_text("#login-type button span", "Using available credentials")
         b.wait_not_visible("#login-diff-password")
-        b.wait_visible("#login-available")
         b.wait_in_text("#login-available", "Login Password")
         b.wait_not_in_text("#login-available", "Kerberos Ticket")
         b.wait_not_present("#login-available .empty")
@@ -843,16 +835,13 @@ class TestMultiMachine(MachineCase):
         b.set_val("#edit-machine-port", "2222")
         b.click('#troubleshoot-dialog .btn-primary')
         # Using libssh's knownhosts api port is taken into account when verifying a host
-        if m1.image not in ['rhel-7-6', 'rhel-7-6-distropkg', "rhel-7-7",
-                            'rhel-atomic', 'debian-stable', 'centos-7', 'ubuntu-1804']:
+        if m1.image not in [ 'ubuntu-1804']:
             b.wait_in_text('#troubleshoot-dialog h4', "Unknown Host Key")
-            b.wait_present("#troubleshoot-dialog .btn-primary:not([disabled])")
             b.wait_in_text('#troubleshoot-dialog .btn-primary', "Connect")
             b.click('#troubleshoot-dialog .btn-primary')
         b.wait_in_text('#troubleshoot-dialog h4', "Log in to")
         b.wait_visible("#login-diff-password")
         b.click("#login-type button")
-        b.wait_visible("#login-type ul li[value='stored'] a")
         b.click("#login-type ul li[value='stored'] a")
         b.wait_not_visible("#login-diff-password")
         b.set_val("#login-custom-user", "root")
@@ -884,7 +873,6 @@ class TestMultiMachine(MachineCase):
         b.click("#login-type li[value=stored] a")
         b.wait_in_text("#login-type button span", "Using available credentials")
         b.wait_not_visible("#login-diff-password")
-        b.wait_visible("#login-available")
 
         b.wait_not_in_text("#login-available", "Login Password")
         b.wait_not_in_text("#login-available", "Kerberos Ticket")

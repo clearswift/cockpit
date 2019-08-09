@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -28,10 +27,9 @@ import parent
 from testlib import *
 
 
-@skipImage("No sosreport", "continuous-atomic")
 class TestSOS(MachineCase):
 
-    def testBasic(self):
+    def testBasic(self, urlroot=""):
         b = self.browser
         m = self.machine
 
@@ -42,13 +40,16 @@ only-plugins=release,date,host
 threads=2
 """)
 
-        self.login_and_go("/sosreport")
+        if urlroot != "":
+            m.execute('mkdir -p /etc/cockpit/ && echo "[WebService]\nUrlRoot=%s" > /etc/cockpit/cockpit.conf' % urlroot)
+
+        self.login_and_go("/sosreport", urlroot=urlroot)
 
         b.click('[data-target="#sos"]')
         b.wait_visible("#sos")
 
         with b.wait_timeout(360):
-            if m.image not in ["rhel-7-6-distropkg", "rhel-8-0-distropkg"]: # Fixed in #11484
+            if m.image not in ["rhel-8-0-distropkg"]: # Fixed in #11484
                 b.wait(lambda: b.eval_js('ph_find(".progress-bar").offsetWidth') > 0)
             b.wait_visible("#sos-download")
 
@@ -66,7 +67,11 @@ threads=2
 
         self.allow_journal_messages('.*comm="sosreport".*')
 
-    @skipImage("Not supported", "continuous-atomic", "fedora-atomic", "rhel-atomic")
+    @skipImage("Fixed in PR #11853", "rhel-8-0-distropkg")
+    def testWithUrlRoot(self):
+        self.testBasic(urlroot="/webcon")
+
+    @skipImage("Not supported", "fedora-atomic")
     def testAppStream(self):
         b = self.browser
         m = self.machine

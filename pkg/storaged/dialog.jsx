@@ -275,12 +275,11 @@ function is_visible(field, values) {
 
 const Body = ({ body, fields, values, errors, onChange }) => {
     function make_row(field, index) {
+        if (field.length !== undefined)
+            return make_rows(field, index);
+
         function change(val) {
             values[field.tag] = val;
-            fields.forEach(f => {
-                if (f.tag && f.options && f.options.update)
-                    values[f.tag] = f.options.update(values, field.tag);
-            });
             onChange(field.tag);
         }
 
@@ -292,20 +291,31 @@ const Body = ({ body, fields, values, errors, onChange }) => {
             );
     }
 
+    function make_rows(fields, index) {
+        let rows = fields.map(make_row).filter(r => r);
+        if (rows.length === 0)
+            return null;
+        else if (index === undefined) // top-level
+            return <form className="ct-form">{ rows }</form>;
+        else // nested
+            return <div key={index} className="ct-form ct-form-box">{ rows }</div>;
+    }
+
     return (
         <div className="modal-body">
             { body || null }
-            { fields.length > 0
-                ? <form className="ct-form-layout">
-                    { fields.map(make_row) }
-                </form> : null
-            }
+            { make_rows(fields) }
         </div>
     );
 };
 
+function flatten(arr1) {
+    return arr1.reduce((acc, val) => Array.isArray(val) ? acc.concat(flatten(val)) : acc.concat(val), []);
+}
+
 export const dialog_open = (def) => {
-    let fields = def.Fields || [ ];
+    let nested_fields = def.Fields || [ ];
+    let fields = flatten(nested_fields);
     let values = { };
 
     fields.forEach(f => { values[f.tag] = f.initial_value });
@@ -326,7 +336,7 @@ export const dialog_open = (def) => {
             id: "dialog",
             title: def.Title,
             body: <Body body={def.Body}
-                        fields={fields}
+                        fields={nested_fields}
                         values={values}
                         errors={errors}
                         onChange={trigger => update(null, trigger)} />
@@ -369,7 +379,7 @@ export const dialog_open = (def) => {
 
         let extra = <div>
             { def.Footer }
-            { def.Action && def.Action.Danger ? <div className="modal-footer-danger">{def.Action.Danger}</div> : null }
+            { def.Action && def.Action.Danger ? <div className="alert alert-danger"><div className="pficon pficon-error-circle-o" />{def.Action.Danger}</div> : null }
         </div>;
 
         return {
@@ -735,7 +745,7 @@ export const CheckBoxes = (tag, title, options) => {
             });
 
             return (
-                <div role="group" className="ct-form-layout-vertical">
+                <div role="group" className="ct-form-vertical">
                     { fieldset }
                 </div>
             );
@@ -746,14 +756,14 @@ export const CheckBoxes = (tag, title, options) => {
 const TextInputCheckedComponent = ({ tag, val, title, update_function }) => {
     return (
         <React.Fragment key={tag}>
-            <div className="checkbox ct-form-layout-split dialog-checkbox-text" data-field={tag} data-field-type="text-input-checked">
+            <div className="checkbox ct-form-split dialog-checkbox-text" data-field={tag} data-field-type="text-input-checked">
                 <label>
                     <input type="checkbox" checked={val !== false}
                         onChange={event => update_function(event.target.checked ? "" : false)} />
                     {title}
                 </label>
             </div>
-            <input className="form-control ct-form-layout-split" type="text" hidden={val === false}
+            <input className="form-control ct-form-split" type="text" hidden={val === false}
                    value={val} onChange={event => update_function(event.target.value)} />
         </React.Fragment>
     );

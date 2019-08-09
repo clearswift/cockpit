@@ -41,7 +41,9 @@ import {
     GET_ALL_NODE_DEVICES,
     GET_ALL_STORAGE_POOLS,
     GET_ALL_VMS,
+    GET_API_DATA,
     GET_HYPERVISOR_MAX_VCPU,
+    GET_INTERFACE,
     GET_LOGGED_IN_USER,
     GET_OS_INFO_LIST,
     GET_NETWORK,
@@ -57,6 +59,8 @@ import {
     RESUME_VM,
     SENDNMI_VM,
     SET_VCPU_SETTINGS,
+    SET_MEMORY,
+    SET_MAX_MEMORY,
     SHUTDOWN_VM,
     START_LIBVIRT,
     START_VM,
@@ -73,8 +77,8 @@ import {
  *  The naming convention for action creator names is: <verb><Noun>
  *  with the present tense.
  */
-export function attachDisk({ connectionName, poolName, volumeName, format, target, permanent, hotplug, vmName, vmId }) {
-    return virt(ATTACH_DISK, { connectionName, poolName, volumeName, format, target, permanent, hotplug, vmName, vmId });
+export function attachDisk({ connectionName, poolName, volumeName, format, target, permanent, hotplug, cacheMode, vmName, vmId }) {
+    return virt(ATTACH_DISK, { connectionName, poolName, volumeName, format, target, permanent, hotplug, cacheMode, vmName, vmId });
 }
 
 export function changeBootOrder({ vm, devices }) {
@@ -150,13 +154,17 @@ export function getAllStoragePools(connectionName) {
     return virt(GET_ALL_STORAGE_POOLS, { connectionName });
 }
 
+export function getAllVms(connectionName) {
+    return virt(GET_ALL_VMS, { connectionName });
+}
+
 /**
  *
  * @param connectionName optional - if `undefined` then for all connections
  * @param libvirtServiceName
  */
-export function getAllVms(connectionName, libvirtServiceName) {
-    return virt(GET_ALL_VMS, { connectionName, libvirtServiceName });
+export function getApiData(connectionName, libvirtServiceName) {
+    return virt(GET_API_DATA, { connectionName, libvirtServiceName });
 }
 
 export function getHypervisorMaxVCPU(connectionName) {
@@ -175,6 +183,10 @@ export function getNetwork({ connectionName, id, name }) {
     return virt(GET_NETWORK, { connectionName, id, name });
 }
 
+export function getInterface({ connectionName, id }) {
+    return virt(GET_INTERFACE, { connectionName, id });
+}
+
 export function getNodeDevice({ connectionName, id }) {
     return virt(GET_NODE_DEVICE, { connectionName, id });
 }
@@ -183,8 +195,8 @@ export function getNodeMaxMemory(connectionName) {
     return virt(GET_NODE_MAX_MEMORY, { connectionName });
 }
 
-export function getStoragePool({ connectionName, id, name }) {
-    return virt(GET_STORAGE_POOL, { connectionName, id, name });
+export function getStoragePool({ connectionName, id, name, updateOnly }) {
+    return virt(GET_STORAGE_POOL, { connectionName, id, name, updateOnly });
 }
 
 export function getStorageVolumes({ connectionName, poolName }) {
@@ -238,6 +250,23 @@ export function setVCPUSettings(vm, max, count, sockets, threads, cores) {
     });
 }
 
+export function setMemory(vm, memory) {
+    return virt(SET_MEMORY, {
+        id: vm.id,
+        connectionName: vm.connectionName,
+        memory,
+        isRunning: vm.state == 'running'
+    });
+}
+
+export function setMaxMemory(vm, maxMemory) {
+    return virt(SET_MAX_MEMORY, {
+        id: vm.id,
+        connectionName: vm.connectionName,
+        maxMemory
+    });
+}
+
 export function shutdownVm(vm) {
     return virt(SHUTDOWN_VM, { name: vm.name, id: vm.id, connectionName: vm.connectionName });
 }
@@ -262,8 +291,8 @@ export function vmDesktopConsole(vm, consoleDetail) {
     return virt(CONSOLE_VM, { name: vm.name, id: vm.id, connectionName: vm.connectionName, consoleDetail });
 }
 
-export function volumeCreateAndAttach({ connectionName, poolName, volumeName, size, format, target, permanent, hotplug, vmName, vmId }) {
-    return virt(CREATE_AND_ATTACH_VOLUME, { connectionName, poolName, volumeName, size, format, target, permanent, hotplug, vmName, vmId });
+export function volumeCreateAndAttach({ connectionName, poolName, volumeName, size, format, target, permanent, hotplug, cacheMode, vmName, vmId }) {
+    return virt(CREATE_AND_ATTACH_VOLUME, { connectionName, poolName, volumeName, size, format, target, permanent, hotplug, cacheMode, vmName, vmId });
 }
 
 /**

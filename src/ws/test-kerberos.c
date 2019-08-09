@@ -64,7 +64,7 @@ setup (TestCase *test,
   if (!mock_kdc_available)
     return;
 
-  test->auth = cockpit_auth_new (FALSE);
+  test->auth = cockpit_auth_new (FALSE, COCKPIT_AUTH_NONE);
 
   mock_kdc_up ();
 
@@ -282,7 +282,7 @@ test_authenticate (TestCase *test,
 
   if (!mock_kdc_available)
     {
-      cockpit_test_skip ("mock kdc not available to test against");
+      g_test_skip ("mock kdc not available to test against");
       return;
     }
 

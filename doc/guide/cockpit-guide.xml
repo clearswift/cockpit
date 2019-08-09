@@ -19,6 +19,7 @@
       <title>Manual pages</title>
       <xi:include href="../man/cockpit.conf.xml"/>
       <xi:include href="../man/cockpit-ws.xml"/>
+      <xi:include href="../man/cockpit-tls.xml"/>
       <xi:include href="../man/cockpit-desktop.xml"/>
       <xi:include href="../man/remotectl.xml"/>
       <xi:include href="../man/cockpit-bridge.xml"/>
@@ -44,15 +45,12 @@
     <xi:include href="feature-realmd.xml"/>
     <xi:include href="feature-terminal.xml"/>
     <xi:include href="feature-pcp.xml"/>
-    <xi:include href="feature-subscription.xml"/>
-    <xi:include href="feature-kubernetes.xml"/>
     <xi:include href="feature-machines.xml"/>
     <xi:include href="feature-selinux.xml"/>
     <xi:include href="feature-tuned.xml"/>
     <xi:include href="feature-sosreport.xml"/>
     <xi:include href="feature-packagekit.xml"/>
     <xi:include href="feature-virtualmachines.xml"/>
-    <xi:include href="feature-ovirt.xml"/>
   </part>
 
   <part id="development">

@@ -30,6 +30,7 @@
 #include "cockpitinteracttransport.h"
 #include "cockpitnullchannel.h"
 #include "cockpitpackages.h"
+#include "cockpitpacketchannel.h"
 #include "cockpitpipechannel.h"
 #include "cockpitinternalmetrics.h"
 #include "cockpitpolkitagent.h"
@@ -70,6 +71,7 @@ static CockpitPayloadType payload_types[] = {
   { "http-stream1", cockpit_http_stream_get_type },
   { "http-stream2", cockpit_http_stream_get_type },
   { "stream", cockpit_pipe_channel_get_type },
+  { "packet", cockpit_packet_channel_get_type },
   { "fsread1", cockpit_fsread_get_type },
   { "fsreplace1", cockpit_fsreplace_get_type },
   { "fswatch1", cockpit_fswatch_get_type },
@@ -607,6 +609,18 @@ run_bridge (const gchar *interactive,
 
   g_source_remove (sig_term);
   g_source_remove (sig_int);
+
+  /* HACK: Valgrind contains a bug that causes it to hang when the main
+   * thread exits quickly in response to a signal received by a handler
+   * in another thread, when that other thread is waiting in a syscall.
+   * Avoid that situation by delaying our exit here, but only under
+   * Valgrind.
+   *
+   * Remove this when https://bugs.kde.org/show_bug.cgi?id=409367 is
+   * fixed and widely distributed.
+   */
+  if (strstr (g_getenv ("LD_PRELOAD") ?: "", "valgrind") != NULL)
+    g_usleep (5 * G_TIME_SPAN_SECOND);
 
   /* So the caller gets the right signal */
   if (terminated)

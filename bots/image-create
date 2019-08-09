@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # This file is part of Cockpit.
 #
 # Copyright (C) 2015 Red Hat, Inc.
@@ -23,7 +23,6 @@
 # vm-run and testlib.py.
 
 import argparse
-import errno
 import os
 import shutil
 import subprocess
@@ -33,7 +32,6 @@ import tempfile
 
 BOTS = os.path.abspath(os.path.dirname(__file__))
 BASE = os.path.normpath(os.path.join(BOTS, ".."))
-TEMP = os.path.join(os.environ.get("TEST_DATA", BASE), "tmp")
 
 from machine import testvm
 
@@ -49,7 +47,7 @@ parser.add_argument('image', help='The image to create')
 args = parser.parse_args()
 
 # default to --no-build for some images
-if args.image in ["candlepin", "continuous-atomic", "fedora-atomic", "ipa", "rhel-atomic", "selenium", "openshift", "openshift-prerelease", "openshift-node", "ovirt"]:
+if args.image in ["candlepin", "continuous-atomic", "fedora-atomic", "ipa", "rhel-atomic", "selenium", "openshift"]:
     if not args.no_build:
         if args.verbose:
             print("Creating machine without build capabilities based on the image type")
@@ -57,26 +55,22 @@ if args.image in ["candlepin", "continuous-atomic", "fedora-atomic", "ipa", "rhe
 
 class MachineBuilder:
     def __init__(self, machine):
+        tempdir = testvm.get_temp_dir()
         self.machine = machine
 
-        try:
-            os.makedirs(TEMP, 0o750)
-        except OSError as ex:
-            if ex.errno != errno.EEXIST:
-                raise
+        os.makedirs(tempdir, 0o750, exist_ok=True)
 
         # Use a tmp filename
         self.target_file = self.machine.image_file
-        fp, self.machine.image_file = tempfile.mkstemp(dir=TEMP, prefix=self.machine.image, suffix=".qcow2")
+        fp, self.machine.image_file = tempfile.mkstemp(dir=tempdir, prefix=self.machine.image, suffix=".qcow2")
         os.close(fp)
 
     def bootstrap_system(self):
         assert not self.machine._domain
 
-        if not os.path.exists(self.machine.run_dir):
-            os.makedirs(self.machine.run_dir, 0o750)
+        os.makedirs(self.machine.run_dir, 0o750, exist_ok=True)
 
-        bootstrap_script = os.path.join(BOTS, "images", "scripts", "%s.bootstrap" % (self.machine.image, ))
+        bootstrap_script = os.path.join(testvm.SCRIPTS_DIR, "%s.bootstrap" % (self.machine.image, ))
 
 
         if os.path.isfile(bootstrap_script):
@@ -84,26 +78,23 @@ class MachineBuilder:
         else:
             raise testvm.Failure("Unsupported OS %s: %s not found." % (self.machine.image, bootstrap_script))
 
-    def run_setup_script(self, script, source):
+    def run_setup_script(self, script):
         """Prepare a test image further by running some commands in it."""
         self.machine.start()
         try:
             self.machine.wait_boot(timeout_sec=120)
-            self.machine.upload([ os.path.join(BOTS, "images", "scripts", "lib") ], "/var/lib/testvm")
+            self.machine.upload([ os.path.join(testvm.SCRIPTS_DIR, "lib") ], "/var/lib/testvm")
             self.machine.upload([script], "/var/tmp/SETUP")
-            if source:
-                self.machine.upload([source], "/var/tmp")
-            self.machine.upload([ os.path.join(BOTS, "images", "scripts", "lib", "base") ],
+            self.machine.upload([ os.path.join(testvm.SCRIPTS_DIR, "lib", "base") ],
                                 "/var/tmp/cockpit-base")
 
             if "rhel" in self.machine.image:
                 self.machine.upload([ os.path.expanduser("~/.rhel") ], "/root/")
 
             env = {
-                "TEST_OS": self.machine.image
+                "TEST_OS": self.machine.image,
+                "DO_BUILD": "0" if args.no_build else "1",
             }
-            if source:
-                env["TEST_SOURCE"] = os.path.join("/var/tmp", os.path.basename(source))
             self.machine.message("run setup script on guest")
 
             try:
@@ -139,17 +130,13 @@ class MachineBuilder:
         self.bootstrap_system()
 
         # gather the scripts, separated by reboots
-        script = os.path.join(BOTS, "images", "scripts", "%s.setup" % (self.machine.image, ))
+        script = os.path.join(testvm.SCRIPTS_DIR, "%s.setup" % (self.machine.image, ))
 
         if not os.path.exists(script):
             return
 
         self.machine.message("Running setup script %s" % (script))
-        if args.no_build:
-            source = None
-        else:
-            source = subprocess.check_output([ os.path.join(BOTS, "make-source") ], universal_newlines=True).strip()
-        self.run_setup_script(script, source)
+        self.run_setup_script(script)
 
         tries_left = 3
         successfully_booted = False
@@ -168,11 +155,9 @@ class MachineBuilder:
             raise testvm.Failure("Unable to verify that machine boot works.")
 
     def save(self):
-        data_dir = os.path.join(os.environ.get("TEST_DATA", BOTS), "images")
-        images_dir = os.path.join(BOTS, "images")
+        data_dir = testvm.get_images_data_dir()
 
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir, 0o750)
+        os.makedirs(data_dir, 0o750, exist_ok=True)
 
         if not os.path.exists(self.machine.image_file):
             raise testvm.Failure("Nothing to save.")
@@ -199,8 +184,8 @@ class MachineBuilder:
             os.unlink(self.target_file)
         os.symlink(name, self.target_file)
 
-        # Handle alternate TEST_DATA
-        image_file = os.path.join(images_dir, name)
+        # Handle alternate images data directory
+        image_file = os.path.join(testvm.IMAGES_DIR, name)
         if not os.path.exists(image_file):
             os.symlink(os.path.abspath(data_file), image_file)
 

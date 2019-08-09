@@ -27,7 +27,9 @@ import { NetworkList } from "./components/networks/networkList.jsx";
 import LibvirtSlate from "./components/libvirtSlate.jsx";
 import { CreateVmAction } from "./components/create-vm-dialog/createVmDialog.jsx";
 import { AggregateStatusCards } from "./components/aggregateStatusCards.jsx";
-import { InlineNotification } from './components/notification/inlineNotification.jsx';
+import { InlineNotification } from 'cockpit-components-inline-notification.jsx';
+
+var permission = cockpit.permission({ admin: true });
 
 class App extends React.Component {
     constructor(props) {
@@ -42,14 +44,21 @@ class App extends React.Component {
         this.onAddErrorNotification = this.onAddErrorNotification.bind(this);
         this.onDismissErrorNotification = this.onDismissErrorNotification.bind(this);
         this.onNavigate = () => this.setState({ path: cockpit.location.path });
+        this.onPermissionChanged = this.onPermissionChanged.bind(this);
     }
 
     componentDidMount() {
         cockpit.addEventListener("locationchanged", this.onNavigate);
+        permission.addEventListener("changed", this.onPermissionChanged);
     }
 
     componentWillUnmount() {
         cockpit.removeEventListener("locationchanged", this.onNavigate);
+        permission.removeEventListener("changed", this.onPermissionChanged);
+    }
+
+    onPermissionChanged() {
+        this.setState({ allowed: permission.allowed !== false });
     }
 
     /*
@@ -93,7 +102,7 @@ class App extends React.Component {
     }
 
     render() {
-        const { vms, config, storagePools, systemInfo, ui, networks, nodeDevices } = this.props.store.getState();
+        const { vms, config, storagePools, systemInfo, ui, networks, nodeDevices, interfaces } = this.props.store.getState();
         const path = this.state.path;
         const dispatch = this.props.store.dispatch;
         const createVmAction = (
@@ -103,10 +112,13 @@ class App extends React.Component {
                 nodeDevices={nodeDevices}
                 nodeMaxMemory={config.nodeMaxMemory}
                 onAddErrorNotification={this.onAddErrorNotification}
-                systemInfo={systemInfo} />
+                storagePools={storagePools}
+                systemInfo={systemInfo}
+                vms={vms} />
         );
 
-        if (systemInfo.libvirtService.activeState !== 'running') {
+        // Show libvirtSlate component if libvirtd is not running only to users that are allowed to start the service.
+        if (systemInfo.libvirtService.activeState !== 'running' && (this.state.allowed === undefined || this.state.allowed)) {
             return (<LibvirtSlate libvirtService={systemInfo.libvirtService} dispatch={dispatch} />);
         }
 
@@ -150,14 +162,19 @@ class App extends React.Component {
                     dispatch={dispatch}
                     vms={vms}
                     loggedUser={systemInfo.loggedUser}
+                    libvirtVersion={systemInfo.libvirtVersion}
                     resourceHasError={this.state.resourceHasError}
                     onAddErrorNotification={this.onAddErrorNotification} />
                 }
                 {config.provider.name === 'LibvirtDBus' && path.length > 0 && path[0] == 'networks' &&
                 <NetworkList networks={networks}
                     dispatch={dispatch}
+                    loggedUser={systemInfo.loggedUser}
                     resourceHasError={this.state.resourceHasError}
-                    onAddErrorNotification={this.onAddErrorNotification} />
+                    onAddErrorNotification={this.onAddErrorNotification}
+                    vms={vms}
+                    nodeDevices={nodeDevices}
+                    interfaces={interfaces} />
                 }
             </div>
         );

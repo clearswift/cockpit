@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,7 +21,7 @@ import parent
 from testlib import *
 
 
-@skipImage("Atomic always uses loopback", "fedora-atomic", "rhel-atomic", "continuous-atomic")
+@skipImage("Atomic always uses loopback", "fedora-atomic")
 class TestLoopback(MachineCase):
 
     def testBasic(self):

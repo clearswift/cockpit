@@ -43,9 +43,9 @@ fi
 
 # Development dependencies: See node_modules/README
 npm prune
-npm install # see package.json
 
-find node_modules -name test | xargs rm -rf
+# npm install is flaky, so give it a few tries
+npm install || { sleep 30; npm install; } || { sleep 30; npm install; }
 
 rm -rf autom4te.cache
 

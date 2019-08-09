@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -23,7 +22,6 @@ from storagelib import *
 from testlib import *
 
 
-@skipImage("UDisks doesn't have support for LVM", "debian-stable")
 class TestStorage(StorageCase):
 
     def testHiddenLuks(self):
@@ -42,7 +40,6 @@ class TestStorage(StorageCase):
         # Create a volume group with a logical volume with a encrypted
         # filesystem.
 
-        b.wait_visible('#create-volume-group')
         b.click('#create-volume-group')
         self.dialog_wait_open()
         self.dialog_set_val('name', "TEST")
@@ -60,7 +57,8 @@ class TestStorage(StorageCase):
         self.content_row_wait_in_col(1, 2, "/dev/TEST/lvol")
 
         self.content_head_action(1, "Format")
-        self.dialog({"type": "luks+ext4",
+        self.dialog({"type": "ext4",
+                     "crypto.on": True,
                      "name": "FS",
                      "passphrase": "einszweidrei",
                      "passphrase2": "einszweidrei",

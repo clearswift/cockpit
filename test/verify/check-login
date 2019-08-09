@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -52,11 +51,7 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
         def login(user, password):
             b.wait_visible("#login")
             b.wait_visible("#login-user-input")
-            if m.image not in ["rhel-7-6-distropkg"]:
-                b.wait_not_visible("#unsupported-browser")
-            else:
-                # old cockpit versions don't have that element at all
-                self.assertFalse(b.is_present("#unsupported-browser"))
+            b.wait_not_visible("#unsupported-browser")
             b.wait_not_present("#login-button:disabled")
             # :focus selector doesn't work in phantomjs
             b.wait_js_cond("document.activeElement.getAttribute('id') === 'login-user-input'")
@@ -92,8 +87,7 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
         # Login as admin
         b.open("/system")
         login("admin", "foobar")
-        with b.wait_timeout(10):
-            b.expect_load()
+        b.expect_load()
         b.wait_present("#content")
         b.wait_text('#content-user-name', 'Administrator')
 
@@ -103,7 +97,6 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
         b.wait_text('#content-user-name', 'Administrator')
 
         b.click("#content-user-name")
-        b.wait_visible('#go-account')
         b.click('#go-account')
         b.enter_page("/users")
         b.wait_text("#account-user-name", "admin")
@@ -133,6 +126,15 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
             m.restart_cockpit()
             b.open("/system")
             b.wait_not_visible("#option-group")
+
+        if not m.atomic_image:
+            # login with user shell that prints some stdout/err noise
+            # having stdout output in ~/.bashrc confuses docker, so don't run on Atomic
+            m.execute("echo 'echo noise-rc-out; echo noise-rc-err >&2' >> ~admin/.bashrc")
+            m.execute("echo 'echo noise-profile-out; echo noise-profile-err >&2' >> ~admin/.profile")
+            login("admin", "foobar")
+            b.expect_load()
+            b.wait_present("#content")
 
         self.allow_journal_messages("Returning error-response ... with reason .*",
                                     "pam_unix\(cockpit:auth\): authentication failure; .*",
@@ -229,8 +231,7 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
         b.set_val('#conversation-input', '123foobar!@#')
         b.click('#login-button')
 
-        with b.wait_timeout(10):
-            b.expect_load()
+        b.expect_load()
         b.wait_present("#content")
         b.wait_text('#content-user-name', 'Administrator')
 
@@ -287,8 +288,7 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
         b.set_val('#conversation-input', '42')
         b.click('#login-button')
 
-        with b.wait_timeout(10):
-            b.expect_load()
+        b.expect_load()
         b.wait_present("#content")
         b.wait_text('#content-user-name', 'Administrator')
 
@@ -330,7 +330,6 @@ account    required     pam_succeed_if.so user ingroup %s""" % m.get_admin_group
                                     "couldn't parse login input: Malformed input",
                                     "couldn't parse login input: Authentication failed")
 
-    @skipImage("cockpit-system too old", "rhel-7-6-distropkg")
     def testUnsupportedBrowser(self):
         m = self.machine
         b = self.browser

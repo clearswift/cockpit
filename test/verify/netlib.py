@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This file is part of Cockpit.
 #
 # Copyright (C) 2017 Red Hat, Inc.
@@ -91,7 +89,6 @@ class NetworkCase(MachineCase):
             text = "Inactive"
 
         try:
-            self.browser.wait_visible(sel)
             self.browser.wait_in_text(sel, text)
         except Error as e:
             print("Interface %s didn't show up." % iface)
@@ -117,3 +114,17 @@ class NetworkCase(MachineCase):
         m.execute("mv /usr/sbin/dhclient /usr/sbin/dhclient.real")
         m.write("/usr/sbin/dhclient", '#! /bin/sh\nsleep %s\nexec /usr/sbin/dhclient.real "$@"' % delay)
         m.execute("chmod a+x /usr/sbin/dhclient")
+
+    def wait_onoff(self, sel, val):
+        # PR #11769 changes On/Off implementation
+        if self.machine.image in ["rhel-8-0-distropkg"]:
+            self.browser.wait_present(sel + " label.active:contains('%s')" % ("On" if val else "Off"))
+        else:
+            self.browser.wait_present(sel + " input" + (":checked" if val else ":not(:checked)"))
+
+    def toggle_onoff(self, sel):
+        # PR #11769 changes On/Off implementation
+        if self.machine.image in ["rhel-8-0-distropkg"]:
+            self.browser.click(sel + " label:not(.active)")
+        else:
+            self.browser.click(sel + " input")

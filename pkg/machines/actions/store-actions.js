@@ -27,11 +27,13 @@ import {
     UNDEFINE_NETWORK,
     UNDEFINE_STORAGE_POOL,
     UNDEFINE_VM,
+    UPDATE_ADD_INTERFACE,
     UPDATE_ADD_NETWORK,
     UPDATE_ADD_NODE_DEVICE,
     UPDATE_ADD_STORAGE_POOL,
     UPDATE_ADD_VM,
     UPDATE_LIBVIRT_STATE,
+    UPDATE_LIBVIRT_VERSION,
     UPDATE_OS_INFO_LIST,
     UPDATE_STORAGE_VOLUMES,
     UPDATE_UI_VM,
@@ -140,10 +142,24 @@ export function updateLibvirtState(state) {
     };
 }
 
-export function updateOrAddNetwork(props) {
+export function updateLibvirtVersion({ libvirtVersion }) {
+    return {
+        type: UPDATE_LIBVIRT_VERSION,
+        libvirtVersion,
+    };
+}
+
+export function updateOrAddInterface(props) {
+    return {
+        type: UPDATE_ADD_INTERFACE,
+        payload: { iface: props },
+    };
+}
+
+export function updateOrAddNetwork(props, updateOnly) {
     return {
         type: UPDATE_ADD_NETWORK,
-        payload: { network: props },
+        payload: { network: props, updateOnly },
     };
 }
 
@@ -154,10 +170,10 @@ export function updateOrAddNodeDevice(props) {
     };
 }
 
-export function updateOrAddStoragePool(props) {
+export function updateOrAddStoragePool(props, updateOnly) {
     return {
         type: UPDATE_ADD_STORAGE_POOL,
-        payload: { storagePool: props },
+        payload: { storagePool: props, updateOnly },
     };
 }
 

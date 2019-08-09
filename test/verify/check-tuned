@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # This file is part of Cockpit.
 #
@@ -22,7 +21,7 @@ import parent
 from testlib import *
 
 
-@skipImage("No tuned packaged", "debian-stable", "fedora-atomic")
+@skipImage("No tuned packaged", "fedora-atomic")
 class TestTuned(MachineCase):
 
     def testBasic(self):
@@ -33,8 +32,6 @@ class TestTuned(MachineCase):
         m = self.machine
 
         recommended_profile = "virtual-guest"
-        if m.image == "rhel-atomic":
-            recommended_profile = "atomic-guest"
 
         # Stop tuned in case it is running by default, as on RHEL.
 
@@ -65,7 +62,6 @@ class TestTuned(MachineCase):
         b.wait_text('#system-info-performance a.action-trigger.disabled', recommended_profile)
         check_status_tooltip('The user admin is not permitted to change profiles')
         b.relogin('/system', authorized=True)
-        b.wait_visible('#system-info-performance a.action-trigger')
 
         # Switch the profile
 
